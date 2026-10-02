@@ -134,12 +134,18 @@ const baseOptions = (fontSize) => ({
 });
 
 /**
+ * The text with each {{variable}} replaced by a number of the same length, so it parses
+ * as JSON and every position in it still lines up with the original.
+ */
+export const withStandIns = (text) => text.replace(/\{\{[^{}]*\}\}/g, (m) => '1' + '0'.repeat(m.length - 1));
+
+/**
  * Checks JSON that may contain {{variables}}. Each variable is swapped for a number of
  * the same length before parsing, so positions in error messages still line up.
  * @returns {null | { message: string, line: number, column: number }} null when valid
  */
 export function checkJson(text) {
-  const stand = text.replace(/\{\{[^{}]*\}\}/g, (m) => '1' + '0'.repeat(m.length - 1));
+  const stand = withStandIns(text);
   try {
     JSON.parse(stand);
     return null;
@@ -166,10 +172,10 @@ export function checkJson(text) {
 
 /**
  * The request body editor.
- * @returns {{ setValue(text), setLanguage(lang), setError(error|null), focus() }}
+ * @returns {{ setValue(text), setLanguage(lang), setProblems(list), setSchema(schema|null), focus() }}
  */
 export function createBodyEditor(monaco, container, { onChange }) {
-  const model = monaco.editor.createModel('', 'json');
+  const model = monaco.editor.createModel('', 'json', monaco.Uri.parse('inmemory://apiwb/request-body.json'));
   const editor = monaco.editor.create(container, { ...baseOptions(13), model, lineNumbers: 'on', glyphMargin: false, folding: true });
   let silent = false;
   let decorations = editor.createDecorationsCollection();
@@ -200,11 +206,30 @@ export function createBodyEditor(monaco, container, { onChange }) {
     setLanguage(language) {
       if (model.getLanguageId() !== language) monaco.editor.setModelLanguage(model, language);
     },
-    setError(error) {
-      monaco.editor.setModelMarkers(model, 'apiwb', error ? [{
-        severity: monaco.MarkerSeverity.Error, message: error.message,
-        startLineNumber: error.line, startColumn: error.column, endLineNumber: error.line, endColumn: error.column + 1,
-      }] : []);
+    /**
+     * Underlines problems: a syntax error ({line, column}) or differences from the design
+     * ({start, end} offsets). severity 'error' is red, 'warning' yellow.
+     */
+    setProblems(problems) {
+      monaco.editor.setModelMarkers(model, 'apiwb', problems.map((p) => {
+        const severity = p.severity === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error;
+        if (p.start != null) {
+          const from = model.getPositionAt(p.start);
+          const to = model.getPositionAt(Math.max(p.end, p.start + 1));
+          return { severity, message: p.message, startLineNumber: from.lineNumber, startColumn: from.column, endLineNumber: to.lineNumber, endColumn: to.column };
+        }
+        return { severity, message: p.message, startLineNumber: p.line, startColumn: p.column, endLineNumber: p.line, endColumn: p.column + 1 };
+      }));
+    },
+    /**
+     * The JSON Schema the design implies, for property-name suggestions (Ctrl+Space).
+     * Monaco's own validation stays off: our check understands {{variables}}, its does not.
+     */
+    setSchema(schema) {
+      monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+        validate: false,
+        schemas: schema ? [{ uri: 'inmemory://apiwb/design-request-schema.json', fileMatch: [model.uri.toString()], schema }] : [],
+      });
     },
     refreshVariables: decorate,
     focus: () => editor.focus(),

@@ -7,7 +7,7 @@ import { session, loadSession } from './session.js';
 import { refreshServerCollections } from './collections.js';
 import { initEnvironments, refreshServerEnvironments } from './environments.js';
 import { initTester, loadRequest } from './tester.js';
-import { initDesigner } from './designer.js';
+import { initDesigner, refreshServerDesigns, openEndpoint } from './designer.js';
 import { initAdmin, showAdmin } from './admin.js';
 
 const views = () => ['tester', 'designer', ...(session.isAdmin ? ['admin'] : [])];
@@ -43,10 +43,15 @@ async function start() {
     return;
   }
   renderHeaderUser();
-  await Promise.all([refreshServerCollections(), refreshServerEnvironments()]);
+  await Promise.all([refreshServerCollections(), refreshServerEnvironments(), refreshServerDesigns()]);
 
   initEnvironments();
-  initTester();
+  initTester({
+    // The chip naming a request's designed endpoint opens it in the Designer.
+    openDesign: (apiId, endpointId) => {
+      if (openEndpoint(apiId, endpointId)) showView('designer');
+    },
+  });
   initDesigner({
     tryIt: (request, name) => {
       loadRequest(request, { name });

@@ -64,6 +64,7 @@
         <div class="request-head">
           <span class="http-badge" aria-hidden="true">HTTP</span>
           <div class="request-name" id="request-name">Untitled request</div>
+          <button type="button" class="design-chip hidden" id="design-chip"></button>
           <span class="spacer"></span>
           <label class="env-picker" title="Fills {{variables}} in the request">
             <span>Environment</span>
@@ -145,6 +146,7 @@
             <span class="response-title">Response</span>
             <div class="response-meta" id="response-meta"></div>
           </div>
+          <div class="contract-report hidden" id="contract-report"></div>
           <div class="subtabs hidden" data-group="res" id="response-tabs">
             <button class="subtab active" data-pane="body">Body</button>
             <button class="subtab" data-pane="headers">Headers <span class="count" id="res-headers-count"></span></button>

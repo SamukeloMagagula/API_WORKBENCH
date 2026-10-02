@@ -192,7 +192,7 @@ The `activity_log` table records:
 | `admin.user.update`, `admin.user.reset_link` | who was changed, and how |
 | `user.password_reset` | a reset link was used |
 | `apiwb.request` | `GET https://api.corp/users -> 200`. The query string is left out because it often carries keys |
-| `apiwb.collection.save` / `.delete`, `apiwb.environment.save` / `.delete` | which item |
+| `apiwb.collection.save` / `.delete`, `apiwb.environment.save` / `.delete`, `apiwb.design.save` / `.delete` | which item |
 
 ```sql
 SELECT created_at, username, action, detail FROM apiworkbench.activity_log ORDER BY id DESC LIMIT 50;
@@ -208,6 +208,41 @@ the **Environment** picker above the URL bar, and the values are filled in when 
 - Under the URL bar, a preview line shows what the URL resolves to, or which variables have no value.
 - A request with an unfilled variable is not sent. The error names the variable.
 - Saved requests and history keep the `{{variables}}`, so the same request works against every environment.
+
+## Designs, and checking requests against them
+
+**Where a design lives.** **New API** asks: this browser, the server for you alone, or the server
+shared with everyone signed in. A browser design has **Save to server**. Server designs save themselves
+a moment after each edit, and the line under the API's details shows *Saving… / Saved*. Two people
+editing one shared design cannot overwrite each other: the later save is refused and the page reloads
+the current version. Only the owner or an admin can delete a design or change its sharing.
+
+**Which endpoint a request is.** The Tester matches every request to a designed endpoint. This works
+whether it came from **Try it**, a pasted curl command, or was typed by hand.
+
+- The method must be the same, and the URL's path must end with the endpoint's path template:
+  `GET {{baseUrl}}/users/7` is `GET /users/{id}`.
+- A path that is exactly a server base path plus the template ranks first, then the most specific
+  template, so `/users/me` beats `/users/{id}`.
+- **Try it** also links the request to its endpoint, until the request is edited into something else.
+- The matched endpoint shows as a chip next to the request name. Click it to open the endpoint in the
+  Designer.
+
+**Request body.** For a matched endpoint with a JSON example:
+
+- **Ctrl+Space** suggests the design's field names.
+- Wrong types are underlined red. Fields the design does not have, and design fields that are missing,
+  are underlined yellow.
+- The line under the body sums it up. `{{variables}}` are allowed.
+
+**Response.** After Send, a pill in the response line says **✓ Matches the design**,
+**⚠ N differences from the design** (click to list them, e.g. `user.id: expected integer, got string`),
+**Status 500 is not in the design**, or that there was nothing to check against. The design's response
+for a status is the exact code, then a range (`4XX`), then `default`.
+
+What "the design" means here: the **example** bodies written in the Designer. Types and field names
+come from those examples. A field can be optional in the real API but present in the example, so a
+*missing* field is a warning, not an error.
 
 ## Code editor (Monaco)
 
@@ -324,7 +359,8 @@ js/variables.js       {{variable}} substitution
 js/curl.js            curl command -> request
 js/codegen.js         request -> curl / PowerShell / Python
 js/session.js         sign-in state and api.php calls
-js/designer.js        Designer tab
+js/designer.js        Designer tab, browser and server designs
+js/contract.js        which designed endpoint a request is; comparing bodies with the design
 js/openapi.js         designer model <-> OpenAPI 3, validation, "Try it"
 js/kvtable.js         editable name/value table
 js/dom.js, storage.js helpers (DOM, modal, toast, localStorage)
@@ -339,6 +375,7 @@ vendor/monaco/        Monaco editor 0.52.2, trimmed (MIT)
   while signed in.
 - No multipart file uploads, cookie jar, or WebSockets.
 - Only one browser-only collection ("This browser"). Create more as database collections.
-- The Designer still saves to the browser only, not to the database.
+- Design checks compare against example bodies, not hand-written schemas: no `required`, `enum`,
+  `format` or `oneOf` rules yet.
 - The Designer describes bodies by example (the schema is inferred). Importing an OpenAPI file keeps paths,
   operations, parameters and examples. Shared `components` are inlined, and security schemes are not imported.

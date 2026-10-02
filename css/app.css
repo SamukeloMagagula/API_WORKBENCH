@@ -432,6 +432,32 @@ body.res-expanded::after {
     border-left: 3px solid #f59e0b; background: #fffbeb; color: var(--warn);
 }
 
+/* ---- Design contract: the chip by the title, the check in the response line ---- */
+.design-chip {
+    display: inline-flex; align-items: center; gap: 6px; max-width: 45%; min-width: 0;
+    border: 1px solid var(--grey-200); border-radius: 20px; background: var(--grey-100); padding: 3px 10px;
+    font: inherit; font-size: 12px; color: var(--ink-soft); cursor: pointer; white-space: nowrap; overflow: hidden;
+}
+.design-chip:hover { border-color: var(--red); color: var(--ink); }
+.design-chip .method { min-width: 0; font-size: 10.5px; }
+.design-chip-api { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.design-chip-path { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; }
+.hint.warn { color: var(--warn); }
+.contract-pill {
+    border: 1px solid; border-radius: 20px; padding: 2px 10px; font: inherit; font-size: 12px; font-weight: 600;
+    background: var(--white); cursor: pointer;
+}
+.contract-ok { color: var(--ok); border-color: var(--ok); background: #f0fdf4; cursor: default; }
+.contract-diff { color: var(--warn); border-color: #f59e0b; background: #fffbeb; }
+.contract-info { color: var(--ink-soft); border-color: var(--grey-300); cursor: default; }
+.contract-report {
+    margin: 8px 0 4px; padding: 10px 14px; border-radius: var(--radius-md);
+    border-left: 3px solid #f59e0b; background: #fffbeb; font-size: 12.5px;
+}
+.contract-report-head { font-weight: 600; color: var(--warn); margin-bottom: 6px; }
+.contract-report ul { margin-left: 18px; font-family: var(--mono); font-size: 12px; color: var(--ink-soft); line-height: 1.6; max-height: 180px; overflow: auto; }
+.design-storage { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 1px solid var(--grey-200); }
+
 /* ---- Admin ---- */
 .admin { grid-template-columns: minmax(0, 1fr); }
 .admin-workspace { max-width: 1240px; width: 100%; margin: 0 auto; }

@@ -67,15 +67,15 @@ CREATE TABLE IF NOT EXISTS activity_log (
 -- For the admin log's action filter. Separate so existing databases get it too.
 CREATE INDEX IF NOT EXISTS activity_action ON activity_log (action, created_at);
 
--- Collections of saved requests, and environments of variables.
+-- Collections of saved requests, environments of variables, and API designs.
 CREATE TABLE IF NOT EXISTS items (
     id         INT AUTO_INCREMENT PRIMARY KEY,
-    kind       ENUM('collection','environment') NOT NULL,
+    kind       ENUM('collection','environment','design') NOT NULL,
     name       VARCHAR(150) NOT NULL,
     owner_id   INT NOT NULL,
     -- 0: only the owner sees it. 1: everyone signed in sees and edits it.
     shared     TINYINT(1) NOT NULL DEFAULT 0,
-    -- The collection's requests or the environment's variables, as JSON.
+    -- The collection's requests, the environment's variables, or the API design, as JSON.
     content    LONGTEXT NOT NULL,
     -- Bumped on every save. A save naming an older version is refused, so two
     -- people editing the same shared item cannot silently overwrite each other.
@@ -88,3 +88,7 @@ CREATE TABLE IF NOT EXISTS items (
     INDEX (kind, shared),
     INDEX (kind, owner_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 'design' was added after the first release. Restating the full list is idempotent,
+-- and widening an ENUM leaves existing rows as they are.
+ALTER TABLE items MODIFY kind ENUM('collection','environment','design') NOT NULL;

@@ -7,7 +7,7 @@ declare(strict_types=1);
 //   GET  api.php?action=collections          collections this user can see
 //   POST api.php?action=collection_save      {id?, name, shared, version?, content}
 //   POST api.php?action=collection_delete    {id}
-//   ...and the same three for environment(s).
+//   ...and the same three for environment(s) and design(s).
 //
 // Admins only:
 //   GET  api.php?action=users                every account
@@ -107,6 +107,9 @@ try {
         'environments' => ['GET', 'environment', 'list'],
         'environment_save' => ['POST', 'environment', 'save'],
         'environment_delete' => ['POST', 'environment', 'delete'],
+        'designs' => ['GET', 'design', 'list'],
+        'design_save' => ['POST', 'design', 'save'],
+        'design_delete' => ['POST', 'design', 'delete'],
     ];
     if (!isset($routes[$action])) {
         throw new ProxyException('NOT_FOUND', "Unknown action: $action", 404);

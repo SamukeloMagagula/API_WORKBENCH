@@ -1,18 +1,121 @@
 // The Designer tab: describe APIs endpoint by endpoint and export them as OpenAPI 3.
-// Runs entirely in the browser; designs are kept in localStorage.
+//
+// A design lives in this browser (localStorage) or, when signed in with storage, on the
+// server: private, or shared with everyone. Server designs save themselves a moment after
+// each edit, with the same version check as collections, so two people editing one
+// shared design cannot silently overwrite each other.
 
-import { $, $$, h, toast, downloadFile, pickFile, copyText, highlightJson } from './dom.js';
+import { $, $$, h, toast, downloadFile, pickFile, copyText, highlightJson, openModal } from './dom.js';
 import { load, save, uid } from './storage.js';
+import { api as callApi, serverStorage, session } from './session.js';
 import {
   METHODS, PARAM_TYPES, PARAM_LOCATIONS, newApi, newEndpoint, newResponse, pathParamNames,
   toOpenApi, toJson, toYaml, parseSpecText, fromOpenApi, validateApi, toTesterRequest,
 } from './openapi.js';
 
+// Every design, browser ones first. A server design carries `_server` (id, version,
+// sharing, owner, what was last saved); `strip` removes it before anything is stored.
 let apis = load('apis', null) ?? [sampleApi()];
 let currentApiId = load('designer.api', null);
 let currentEndpointId = load('designer.endpoint', null);
 let previewFormat = load('designer.format', 'yaml');
 let onTryIt = () => {};
+const designListeners = new Set();
+const saveTimers = new Map();
+
+const strip = ({ _server, ...api }) => api;
+const localApis = () => apis.filter((a) => !a._server);
+
+/** Every design, for matching Tester requests to endpoints. Read live; do not keep. */
+export const listDesigns = () => apis;
+
+/** Called whenever a design changes, is added or removed. */
+export const onDesignsChange = (fn) => designListeners.add(fn);
+const notifyDesigns = () => designListeners.forEach((fn) => fn());
+
+/** Shows an endpoint in the Designer (the caller switches to the Designer view). */
+export function openEndpoint(apiId, endpointId) {
+  if (!apis.some((a) => a.id === apiId)) return false;
+  currentApiId = apiId;
+  currentEndpointId = endpointId;
+  renderAll();
+  commit();
+  return true;
+}
+
+function normalizeApi(content) {
+  const api = { ...newApi(), ...content };
+  api.id = content.id || uid();
+  api.servers = Array.isArray(api.servers) ? api.servers : [];
+  api.endpoints = Array.isArray(api.endpoints) ? api.endpoints : [];
+  return api;
+}
+
+function fromItem(item) {
+  const api = normalizeApi(item.content);
+  api._server = { id: item.id, version: item.version, shared: item.shared, mine: item.mine, owner: item.owner, savedJson: null };
+  api._server.savedJson = JSON.stringify(strip(api));
+  return api;
+}
+
+/** Loads the server's designs, keeping the browser ones. */
+export async function refreshServerDesigns() {
+  let server = [];
+  if (serverStorage()) {
+    try {
+      server = (await callApi('designs')).items.map(fromItem);
+    } catch (e) {
+      toast(`Could not load designs from the server: ${e.message}`, 'error');
+    }
+  }
+  apis = [...localApis(), ...server];
+}
+
+function setSaveState(text, kind = '') {
+  const el = $('#design-save-state');
+  if (!el) return;
+  el.textContent = text;
+  el.className = `hint ${kind}`;
+}
+
+/** Saves a server design shortly after the last edit, rather than on every keystroke. */
+function scheduleServerSave(api) {
+  if (JSON.stringify(strip(api)) === api._server.savedJson) return;
+  setSaveState('Unsaved changes…');
+  clearTimeout(saveTimers.get(api.id));
+  // Two seconds after the last edit: each save is an activity-log row, so not per keystroke.
+  saveTimers.set(api.id, setTimeout(() => saveServerApi(api), 2000));
+}
+
+async function saveServerApi(api) {
+  const s = api._server;
+  const content = strip(api);
+  const json = JSON.stringify(content);
+  if (json === s.savedJson) return;
+  if (s.saving) { s.again = true; return; }
+  s.saving = true;
+  setSaveState('Saving…');
+  try {
+    const { item } = await callApi('design_save', { id: s.id, name: api.title || 'Untitled API', shared: s.shared, version: s.version, content });
+    Object.assign(s, { version: item.version, shared: item.shared, savedJson: json });
+    setSaveState('Saved', 'ok');
+  } catch (e) {
+    setSaveState('Not saved', 'error');
+    toast(e.message, 'error');
+    if (e.code === 'CONFLICT' || e.code === 'NOT_FOUND') {
+      await refreshServerDesigns();
+      if (!apis.some((a) => a.id === currentApiId)) currentApiId = apis[0]?.id ?? null;
+      renderAll();
+      commit();
+    }
+  } finally {
+    s.saving = false;
+    if (s.again) {
+      s.again = false;
+      saveServerApi(api);
+    }
+  }
+}
 
 function sampleApi() {
   const api = newApi('Users API (example)');
@@ -52,12 +155,15 @@ const currentEndpoint = () => currentApi()?.endpoints.find((e) => e.id === curre
 
 /** Saves, then refreshes everything outside the endpoint editor (so typing keeps focus). */
 function commit() {
-  save('apis', apis);
+  save('apis', localApis());
   save('designer.api', currentApiId);
   save('designer.endpoint', currentEndpointId);
+  const api = currentApi();
+  if (api?._server) scheduleServerSave(api);
   renderApiSelect();
   renderEndpointList();
   renderPreview();
+  notifyDesigns();
 }
 
 function selectApi(id) {
@@ -82,7 +188,42 @@ function renderAll() {
 
 function renderApiSelect() {
   const select = $('#api-select');
-  select.replaceChildren(...apis.map((a) => h('option', { value: a.id, text: a.title || 'Untitled API', selected: a.id === currentApiId })));
+  const where = (a) => (a._server ? (a._server.shared ? ' (shared)' : ' (only me)') : serverStorage() ? ' (this browser)' : '');
+  select.replaceChildren(...apis.map((a) => h('option', { value: a.id, text: (a.title || 'Untitled API') + where(a), selected: a.id === currentApiId })));
+}
+
+/** Where the design is kept, and the controls that go with that. */
+function storageRow(api) {
+  if (!api._server) {
+    return h('div', { class: 'design-storage' },
+      h('span', { class: 'hint', text: 'Stored in this browser only.' }),
+      serverStorage() ? h('button', { class: 'btn small', text: 'Save to server', onclick: () => copyToServer(api) }) : null);
+  }
+  const s = api._server;
+  const canShare = s.mine || session.isAdmin;
+  return h('div', { class: 'design-storage' },
+    h('label', { class: 'check small', title: canShare ? '' : `Only ${s.owner} or an admin can change this` },
+      h('input', {
+        type: 'checkbox', checked: s.shared, disabled: !canShare,
+        onchange: (e) => { s.shared = e.target.checked; s.savedJson = null; scheduleServerSave(api); renderApiSelect(); },
+      }), 'Shared with everyone signed in'),
+    h('span', { class: 'hint', text: s.mine ? 'Yours' : `Owner: ${s.owner}` }),
+    h('span', { class: 'hint', id: 'design-save-state' }));
+}
+
+async function copyToServer(api) {
+  try {
+    const content = { ...strip(api), id: uid() }; // a new id: the browser copy and the server one are separate designs
+    const { item } = await callApi('design_save', { id: 0, name: api.title || 'Untitled API', shared: false, version: 0, content });
+    const copy = fromItem(item);
+    apis.push(copy);
+    if (confirm(`Saved “${copy.title}” to the server (only you can see it until you share it).\n\nRemove the copy in this browser?`)) {
+      apis = apis.filter((a) => a !== api);
+    }
+    selectApi(copy.id);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
 function renderApiInfo() {
@@ -92,6 +233,7 @@ function renderApiInfo() {
 
   const field = (label, el) => h('label', {}, label, el);
   box.replaceChildren(
+    storageRow(api),
     field('Title', h('input', { type: 'text', value: api.title, oninput: (e) => { api.title = e.target.value; commit(); } })),
     field('Version', h('input', { type: 'text', value: api.version, oninput: (e) => { api.version = e.target.value; commit(); } })),
     field('Description', h('textarea', { rows: 2, value: api.description, oninput: (e) => { api.description = e.target.value; commit(); } })),
@@ -140,7 +282,7 @@ function renderEditor() {
   const set = (fn) => (e) => { fn(e.target); commit(); };
 
   const basics = section('Endpoint', [
-    h('button', { class: 'btn small primary', text: 'Try it', title: 'Open this endpoint in the Tester', onclick: () => onTryIt(toTesterRequest(api, ep), `${ep.method} ${ep.path}`) }),
+    h('button', { class: 'btn small primary', text: 'Try it', title: 'Open this endpoint in the Tester', onclick: () => onTryIt({ ...toTesterRequest(api, ep), design: { apiId: api.id, endpointId: ep.id } }, `${ep.method} ${ep.path}`) }),
     h('button', { class: 'btn small', text: 'Duplicate', onclick: duplicateEndpoint }),
     h('button', { class: 'btn small danger', text: 'Delete', onclick: deleteEndpoint }),
   ],
@@ -309,16 +451,60 @@ function deleteEndpoint() {
 }
 
 function createApi() {
-  const title = prompt('Name of the new API:', 'My API');
-  if (title === null) return;
-  const api = newApi(title.trim() || 'My API');
-  apis.push(api);
-  selectApi(api.id);
+  const nameInput = h('input', { type: 'text', value: 'My API' });
+  const options = [h('option', { value: 'local', text: 'This browser only' })];
+  if (serverStorage()) {
+    options.unshift(
+      h('option', { value: 'private', text: 'Server, only me' }),
+      h('option', { value: 'shared', text: 'Server, shared with everyone signed in' }));
+  }
+  const where = h('select', {}, ...options);
+  const modal = openModal({
+    title: 'New API',
+    body: h('div', {},
+      h('div', { class: 'form-group' }, h('label', {}, 'Name', nameInput)),
+      h('div', { class: 'form-group' }, h('label', {}, 'Stored in', where))),
+    actions: [
+      h('button', { class: 'btn', text: 'Cancel', onclick: () => modal.close() }),
+      h('button', {
+        class: 'btn primary', text: 'Create',
+        onclick: async () => {
+          const api = newApi(nameInput.value.trim() || 'My API');
+          if (where.value === 'local') {
+            apis.push(api);
+          } else {
+            try {
+              const { item } = await callApi('design_save', { id: 0, name: api.title, shared: where.value === 'shared', version: 0, content: api });
+              apis.push(fromItem(item));
+            } catch (e) {
+              return toast(e.message, 'error');
+            }
+          }
+          modal.close();
+          selectApi(api.id);
+        },
+      }),
+    ],
+  });
+  nameInput.select();
 }
 
-function deleteApi() {
+async function deleteApi() {
   const api = currentApi();
-  if (!api || !confirm(`Delete the API “${api.title}” and all its endpoints? Download it first if you want a copy.`)) return;
+  if (!api) return;
+  if (api._server && !api._server.mine && !session.isAdmin) {
+    return toast(`Only ${api._server.owner} or an admin can delete this design.`, 'error');
+  }
+  const shared = api._server?.shared ? ' It is shared, so it disappears for everyone.' : '';
+  if (!confirm(`Delete the API “${api.title}” and all its endpoints?${shared} Download it first if you want a copy.`)) return;
+  if (api._server) {
+    try {
+      clearTimeout(saveTimers.get(api.id));
+      await callApi('design_delete', { id: api._server.id });
+    } catch (e) {
+      return toast(e.message, 'error');
+    }
+  }
   apis = apis.filter((a) => a.id !== api.id);
   if (!apis.length) apis.push(newApi('My API'));
   selectApi(apis[0].id);

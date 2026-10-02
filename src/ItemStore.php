@@ -14,7 +14,7 @@ declare(strict_types=1);
  */
 final class ItemStore
 {
-    public const KINDS = ['collection', 'environment'];
+    public const KINDS = ['collection', 'environment', 'design'];
 
     public function __construct(private PDO $db, private int $maxBytes)
     {

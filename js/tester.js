@@ -11,7 +11,9 @@ import { resolveRequest, hasVariables } from './variables.js';
 import { listCollections, currentCollection, setCurrentCollection, updateRequests, createCollection, deleteCollection } from './collections.js';
 import { looksLikeCurl, parseCurl } from './curl.js';
 import { GENERATORS } from './codegen.js';
-import { loadMonaco, monacoWanted, setVariableSource, checkJson, createBodyEditor, createResponseViewer } from './editor.js';
+import { loadMonaco, monacoWanted, setVariableSource, checkJson, withStandIns, createBodyEditor, createResponseViewer } from './editor.js';
+import { findEndpoint, requestSchema, responseFor, compare, locate, rangesFor } from './contract.js';
+import { listDesigns, onDesignsChange } from './designer.js';
 
 const HISTORY_LIMIT = 50;
 const EXPORT_FORMAT = 'api-workbench-requests';
@@ -37,6 +39,11 @@ const inFlight = new Map(); // tab id -> AbortController
 let bodyEditor = null;
 let resViewer = null;
 
+// The designed endpoint the active tab's request matches, if any (contract.js).
+let contract = null;
+let reportOpen = false;
+let openDesign = () => {};
+
 export function blankRequest() {
   return {
     method: 'GET',
@@ -60,6 +67,8 @@ function normalize(r = {}) {
       text: r.body?.text || '',
       form: Array.isArray(r.body?.form) ? r.body.form.map((x) => ({ name: x.name || '', value: x.value || '', enabled: x.enabled !== false })) : [],
     },
+    // Set by the Designer's "Try it": which designed endpoint this request is for.
+    design: r.design?.apiId && r.design?.endpointId ? { apiId: r.design.apiId, endpointId: r.design.endpointId } : null,
   };
 }
 
@@ -262,22 +271,116 @@ function renderBody() {
   updateBodyStatus();
 }
 
-/** JSON check under the body, and as a red squiggle in the editor. {{variables}} are allowed. */
+/**
+ * The line under the body, and underlines in the editor: first is it JSON at all, then,
+ * when the request matches a designed endpoint, how it differs from the design's example.
+ * {{variables}} are allowed throughout.
+ */
 function updateBodyStatus() {
   const el = $('#body-status');
   el.className = 'hint';
   el.textContent = '';
-  bodyEditor?.setError(null);
+  bodyEditor?.setProblems([]);
   if (req.body.type !== 'json' || !req.body.text.trim()) return;
+
   const error = checkJson(req.body.text);
   if (error) {
     el.textContent = `Line ${error.line}, column ${error.column}: ${error.message}`;
     el.classList.add('error');
-    bodyEditor?.setError(error);
-  } else {
+    bodyEditor?.setProblems([{ ...error, severity: 'error' }]);
+    return;
+  }
+
+  const schema = contract ? requestSchema(contract.endpoint) : null;
+  if (!schema) {
     el.textContent = hasVariables(req.body.text) ? 'Valid JSON ({{variables}} are filled in when sent)' : 'Valid JSON';
     el.classList.add('ok');
+    return;
   }
+  const text = withStandIns(req.body.text);
+  const issues = compare(JSON.parse(text), schema);
+  bodyEditor?.setProblems(rangesFor(issues, locate(text)));
+  if (!issues.length) {
+    el.textContent = 'Valid JSON, matches the design';
+    el.classList.add('ok');
+  } else {
+    const errors = issues.filter((i) => i.severity === 'error').length;
+    el.textContent = `Valid JSON, ${issues.length} difference${issues.length === 1 ? '' : 's'} from the design`
+      + (bodyEditor ? ' (underlined)' : `: ${issues.slice(0, 3).map((i) => i.message).join('; ')}`);
+    el.classList.add(errors ? 'error' : 'warn');
+  }
+}
+
+/**
+ * Works out which designed endpoint the request is, and refreshes everything that
+ * depends on it: the chip by the title, the body's suggestions and check, the response check.
+ */
+function updateContract() {
+  const { request } = resolveRequest(req, activeVariables());
+  contract = findEndpoint(listDesigns(), { method: req.method, url: request.url, design: req.design });
+
+  const chip = $('#design-chip');
+  chip.classList.toggle('hidden', !contract);
+  if (contract) {
+    const { api, endpoint, how } = contract;
+    chip.replaceChildren(
+      h('span', { class: 'design-chip-api', text: api.title || 'Untitled API' }),
+      ' › ',
+      h('span', { class: `method ${endpoint.method}`, text: endpoint.method }),
+      h('span', { class: 'design-chip-path', text: endpoint.path }));
+    chip.title = `${how === 'linked' ? 'Opened from' : 'Matches'} this endpoint in the Designer: the body and the response are checked against it. Click to open it.`;
+  }
+
+  bodyEditor?.setSchema(contract ? requestSchema(contract.endpoint) : null);
+  updateBodyStatus();
+  if (lastResponse?.ok) renderContractCheck(lastResponse);
+}
+
+/** How a response compares with the design. Null when the request matches no design. */
+function checkResponse(data) {
+  if (!contract) return null;
+  const { response, schema, documented } = responseFor(contract.endpoint, data.status);
+  if (!response) {
+    return { state: 'diff', summary: `Status ${data.status} is not in the design`, items: [documented.length ? `The design lists: ${documented.join(', ')}` : 'The design lists no responses.'] };
+  }
+  if (!schema) return { state: 'info', summary: `Status ${response.status} is in the design (no JSON example to check the body against)`, items: [] };
+  if (data.bodyEncoding !== 'text') return { state: 'info', summary: 'Binary body: not checked against the design', items: [] };
+  let value;
+  try {
+    value = JSON.parse(data.body);
+  } catch {
+    return { state: 'diff', summary: 'The design expects JSON; this body is not JSON', items: [] };
+  }
+  const issues = compare(value, schema);
+  if (!issues.length) return { state: 'ok', summary: 'Matches the design', items: [] };
+  const count = issues.length >= 50 ? '50+' : issues.length;
+  return { state: 'diff', summary: `${count} difference${issues.length === 1 ? '' : 's'} from the design`, items: issues.map((i) => i.message) };
+}
+
+/** The pill in the response line, and the list of differences under it. */
+function renderContractCheck(data) {
+  $('#response-meta .contract-pill')?.remove();
+  const report = $('#contract-report');
+  const result = data?.ok ? checkResponse(data) : null;
+  if (!result) {
+    report.classList.add('hidden');
+    return;
+  }
+  const icon = { ok: '✓', diff: '⚠', info: 'ℹ' }[result.state];
+  const pill = h('button', {
+    type: 'button', class: `contract-pill contract-${result.state}`, text: `${icon} ${result.summary}`,
+    title: result.items.length ? 'Show or hide the differences' : `Checked against ${contract.api.title} › ${contract.endpoint.method} ${contract.endpoint.path}`,
+    onclick: () => {
+      if (!result.items.length) return;
+      reportOpen = !reportOpen;
+      report.classList.toggle('hidden', !reportOpen);
+    },
+  });
+  $('#response-meta').append(pill);
+  report.replaceChildren(
+    h('div', { class: 'contract-report-head', text: `Compared with ${contract.api.title} › ${contract.endpoint.method} ${contract.endpoint.path}` }),
+    h('ul', {}, ...result.items.map((item) => h('li', { text: item }))));
+  report.classList.toggle('hidden', !result.items.length || !reportOpen);
 }
 
 /** Under the URL bar: what {{variables}} in the URL turn into with the active environment. */
@@ -311,6 +414,7 @@ function renderRequest() {
   renderAuth();
   renderBody();
   updateUrlPreview();
+  updateContract();
 }
 
 // ---------------------------------------------------------------- sidebar: collections + history
@@ -797,6 +901,7 @@ function hideResponsePanes() {
 function clearResponse() {
   lastResponse = null;
   $('#response-meta').replaceChildren();
+  $('#contract-report').classList.add('hidden');
   $('#response-tabs').classList.add('hidden');
   hideResponsePanes();
   $('#response-empty').classList.remove('hidden');
@@ -818,6 +923,7 @@ function showResponse(data) {
         : null,
     ].filter(Boolean));
     tabsEl.classList.add('hidden');
+    $('#contract-report').classList.add('hidden');
     setExpanded(false); // the toolbar holding the collapse button is hidden for errors
     hideResponsePanes();
     $('#res-body').textContent = '';
@@ -832,6 +938,7 @@ function showResponse(data) {
     h('span', { class: 'muted', text: formatBytes(data.sizeBytes) }),
     data.truncated ? h('span', { class: 'hint error', text: 'Response was cut off at the server size limit.' }) : null,
   ].filter(Boolean));
+  renderContractCheck(data);
   tabsEl.classList.remove('hidden');
   const pane = $('#response-tabs .subtab.active')?.dataset.pane || 'body';
   showPane('res', pane);
@@ -1012,7 +1119,9 @@ function startEditors() {
 
 const testerVisible = () => !$('#view-tester').classList.contains('hidden');
 
-export function initTester() {
+/** @param {{ openDesign?: (apiId: string, endpointId: string) => void }} options */
+export function initTester({ openDesign: open } = {}) {
+  if (open) openDesign = open;
   restoreTabs();
   const first = activeId;
   activeId = null; // nothing to stash yet
@@ -1022,6 +1131,7 @@ export function initTester() {
   $('#req-method').addEventListener('change', (e) => {
     req.method = e.target.value;
     e.target.className = `method-select m-${req.method}`;
+    updateContract();
     renderTabs();
     persistTabs();
   });
@@ -1030,6 +1140,7 @@ export function initTester() {
     params = parseParams(req.url);
     renderParams();
     updateUrlPreview();
+    updateContract();
     renderRequestName();
     renderTabs();
     persistTabs();
@@ -1098,7 +1209,12 @@ export function initTester() {
 
   onEnvironmentChange(() => {
     updateUrlPreview();
+    updateContract();
     bodyEditor?.refreshVariables();
+  });
+  onDesignsChange(updateContract);
+  $('#design-chip').addEventListener('click', () => {
+    if (contract) openDesign(contract.api.id, contract.endpoint.id);
   });
   startEditors();
 
