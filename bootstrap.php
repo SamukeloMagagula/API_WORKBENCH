@@ -42,6 +42,7 @@ if (PHP_VERSION_ID < 80000) {
 
 require __DIR__ . '/src/ProxyException.php';
 require __DIR__ . '/src/Config.php';
+require __DIR__ . '/src/Session.php';
 require __DIR__ . '/src/Auth.php';
 
 /** Reads the JSON body of a POST, capped at $maxBytes. */

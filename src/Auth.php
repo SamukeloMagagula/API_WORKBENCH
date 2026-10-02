@@ -2,14 +2,13 @@
 declare(strict_types=1);
 
 /**
- * Who is using the app, borrowed from devhub.
+ * Who is using the app, for the JSON endpoints (proxy.php, api.php).
  *
- * With auth = 'devhub' the app reads devhub's PHP session: same server, same session
- * store, same cookie, so anyone signed in to devhub is signed in here too, and the
- * CSRF token devhub keeps in that session protects this app's writes as well. There
- * is no second user list and no second sign-in page.
+ * With auth = 'login' people sign in through login.php / auth.php, which put the
+ * user in the app's own session (src/Session.php). This reads that session, guards
+ * state-changing calls with its CSRF token, and writes the activity log.
  *
- * With auth = 'none' every method is a no-op and the app behaves as before.
+ * With auth = 'none' every method is a no-op: nobody signs in and nothing is stored.
  */
 final class Auth
 {
@@ -24,28 +23,23 @@ final class Auth
 
     public function enabled(): bool
     {
-        return $this->config['auth'] === 'devhub';
+        return $this->config['auth'] === 'login';
     }
 
     /**
-     * Opens devhub's session, notes who is signed in, then releases it.
+     * Opens the session, notes who is signed in, then releases it.
      *
      * The session file is locked while open. A proxied call can run for
      * timeout_seconds, and holding the lock that long would stall every other
-     * request this browser makes, to devhub or here, until it finished.
+     * request this browser makes to the app until it finished.
      */
     public function start(bool $mintCsrf = false): void
     {
         if (!$this->enabled() || $this->started) return;
         $this->started = true;
 
-        // Same parameters as devhub's auth.php, so both apps read and write one cookie.
-        session_set_cookie_params(['httponly' => true, 'samesite' => 'Lax']);
-        session_start();
-        if ($mintCsrf && empty($_SESSION['csrf_token'])) {
-            $_SESSION['csrf_token'] = bin2hex(random_bytes(32)); // same key devhub's csrf.php uses
-        }
-        $this->csrf = (string) ($_SESSION['csrf_token'] ?? '');
+        apiwb_session_start();
+        $this->csrf = $mintCsrf ? csrf_token() : (string) ($_SESSION['csrf_token'] ?? '');
         $id = (int) ($_SESSION['user_id'] ?? 0);
         $this->user = $id > 0 ? ['id' => $id, 'username' => (string) ($_SESSION['username'] ?? '')] : null;
         session_write_close();
@@ -64,7 +58,7 @@ final class Auth
         if (!$this->enabled()) return ['id' => 0, 'username' => ''];
         $user = $this->user();
         if ($user === null) {
-            throw new ProxyException('NOT_SIGNED_IN', 'Sign in to devhub first, then reload this page.', 401);
+            throw new ProxyException('NOT_SIGNED_IN', 'Your session has ended. Sign in again.', 401);
         }
         return $user;
     }
@@ -75,7 +69,7 @@ final class Auth
         return $this->csrf;
     }
 
-    /** State-changing requests must echo the session's token in X-CSRF-Token, as in devhub. */
+    /** State-changing requests must echo the session's token in X-CSRF-Token. */
     public function requireCsrf(): void
     {
         if (!$this->enabled()) return;
@@ -86,36 +80,25 @@ final class Auth
         }
     }
 
-    /** devhub's database, through the connect() its config file defines. */
+    /** The app's database, through the connect() that CONFIG_PATH defines. */
     public function db(): PDO
     {
-        if ($this->db !== null) return $this->db;
-
-        $path = (string) $this->config['devhub_config'];
-        // Checked explicitly so a misplaced config reports itself instead of dying as a
-        // bare "failed to open stream" fatal.
-        if (!is_readable($path)) {
-            throw new ProxyException('CONFIG_ERROR', "Cannot read the database config at $path"
-                . ' — check it exists and is readable by the web server user, or point APIWB_CONFIG at it.', 500);
-        }
-        require_once $path;
-        if (!function_exists('connect')) {
-            throw new ProxyException('CONFIG_ERROR', "$path was loaded but does not define connect(): PDO.", 500);
-        }
-        $this->db = connect();
+        if ($this->db === null) $this->db = apiwb_db($this->config['config_path']);
         return $this->db;
     }
 
+    /** An admin is flagged in users.is_admin, or is the configured owner. */
     public function isAdmin(int $userId): bool
     {
         if (!$this->enabled() || $userId <= 0) return false;
-        $stmt = $this->db()->prepare('SELECT is_admin FROM users WHERE id = ?');
+        $stmt = $this->db()->prepare('SELECT username, is_admin FROM users WHERE id = ?');
         $stmt->execute([$userId]);
-        return (bool) $stmt->fetchColumn();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row && ((bool) $row['is_admin'] || ($this->config['owner'] !== '' && $row['username'] === $this->config['owner']));
     }
 
     /**
-     * Writes to devhub's activity log, so the admin Logs page shows API Workbench use.
+     * Writes to the activity log.
      *
      * A logging failure is reported to the PHP error log rather than failing the
      * request: the user's call has already happened by the time it is logged.
@@ -124,12 +107,34 @@ final class Auth
     {
         if (!$this->enabled() || $this->user === null) return;
         try {
-            $this->db()->prepare('INSERT INTO activity_log (username, action, detail) VALUES (?, ?, ?)')
-                ->execute([$this->user['username'], $action, mb_substr_safe($detail, 1000)]);
+            apiwb_log($this->db(), $this->user['username'], $action, $detail);
         } catch (Throwable $e) {
             error_log('API Workbench: could not write activity_log: ' . $e->getMessage());
         }
     }
+}
+
+/**
+ * Connects through the config file's connect(), checking it explicitly so a misplaced
+ * config reports itself instead of dying as a bare "failed to open stream" fatal.
+ */
+function apiwb_db(string $path): PDO
+{
+    if (!is_readable($path)) {
+        throw new ProxyException('CONFIG_ERROR', "Cannot read the database config at $path"
+            . ' — check it exists and is readable by the web server user (see config.example.php).', 500);
+    }
+    require_once $path;
+    if (!function_exists('connect')) {
+        throw new ProxyException('CONFIG_ERROR', "$path was loaded but does not define connect(): PDO. See config.example.php.", 500);
+    }
+    return connect();
+}
+
+function apiwb_log(PDO $db, string $username, string $action, string $detail = ''): void
+{
+    $db->prepare('INSERT INTO activity_log (username, action, detail) VALUES (?, ?, ?)')
+        ->execute([$username, $action, $detail === '' ? null : mb_substr_safe($detail, 1000)]);
 }
 
 /** Truncates without splitting a UTF-8 character, with or without mbstring. */

@@ -1,6 +1,6 @@
 // Environments: named sets of {{variables}} (dev, UAT, prod...) and which one is active.
 //
-// An environment lives either in this browser, or on the server (with auth = 'devhub'),
+// An environment lives either in this browser, or on the server (when sign-in is on),
 // where it is private to its owner or shared with everyone signed in.
 
 import { $, h, toast, openModal } from './dom.js';

@@ -5,8 +5,8 @@ declare(strict_types=1);
 // JSON; the request is checked against config, sent with cURL, and the response
 // returned as JSON. GET returns the public parts of the config.
 //
-// With auth = 'devhub', only people signed in to devhub may use it, every call must
-// carry the session's CSRF token, and every call is written to devhub's activity log
+// With auth = 'login' (the default), only signed-in users may use it, every call must
+// carry the session's CSRF token, and every call is written to the activity log
 // (method and URL without the query string, which often carries keys).
 
 require __DIR__ . '/bootstrap.php';

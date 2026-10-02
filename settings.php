@@ -10,9 +10,9 @@ declare(strict_types=1);
  * on a laptop with no database. The defaults are the production layout, so a deployed
  * install needs no environment at all. On Apache, set overrides with SetEnv (see README).
  *
- * Database credentials are not here. They live in CONFIG_PATH, in the same shape as
- * devhub's config.php: DB_* constants and connect(): PDO. By default that is config.php
- * in this folder, which is gitignored and denied to browsers by .htaccess.
+ * Database credentials are not here. They live in CONFIG_PATH: DB_* constants and
+ * connect(): PDO (see config.example.php). By default that is config.php in this
+ * folder, which is gitignored and denied to browsers by .htaccess.
  */
 
 /** Comma-separated environment variable as a list; empty entries dropped. */
@@ -43,14 +43,33 @@ define('APP_MODE', getenv('APIWB_MODE') === 'local' ? 'local' : 'hosted');
 /**
  * Who may use the app.
  *
- *   devhub  only people signed in to devhub on this server. Saves collections and
- *           environments to the database and logs every proxied call to activity_log
- *   none    anyone who can open the page; everything stays in the browser, no database
+ *   login  people with an account here. Collections and environments can be saved to
+ *          the database, and every proxied call is written to activity_log
+ *   none   anyone who can open the page; everything stays in the browser, no database
  */
-define('AUTH_MODE', getenv('APIWB_AUTH') === 'none' ? 'none' : 'devhub');
+define('AUTH_MODE', getenv('APIWB_AUTH') === 'none' ? 'none' : 'login');
 
-/** Where the "Sign in via devhub" link points. */
-define('DEVHUB_URL', getenv('APIWB_DEVHUB_URL') ?: '/devhub/');
+/**
+ * The permanent admin, by username (email). Empty by default: the first account
+ * created becomes an admin instead, so a fresh install always has one.
+ */
+define('OWNER_USER', strtolower(trim((string) getenv('APIWB_OWNER'))));
+
+/**
+ * Optional shared secret required to create an account.
+ *
+ * Empty (the default) lets anyone who can reach the page register, which is only an
+ * access control if the server is unreachable from outside. Set it and reaching the
+ * form is no longer enough.
+ */
+define('REGISTRATION_KEY', getenv('APIWB_REGISTRATION_KEY') ?: '');
+
+/** When set, e.g. "@za.logicalis.com", accounts must use an email address ending in it. */
+define('EMAIL_DOMAIN', strtolower(trim((string) getenv('APIWB_EMAIL_DOMAIN'))));
+
+/** Failed sign-ins allowed per username and per IP within LOGIN_WINDOW_SECONDS. */
+define('LOGIN_MAX_ATTEMPTS', (int) (getenv('APIWB_LOGIN_MAX_ATTEMPTS') ?: 10));
+define('LOGIN_WINDOW_SECONDS', (int) (getenv('APIWB_LOGIN_WINDOW') ?: 900));
 
 /**
  * Hosts the proxy may call even when they resolve to private addresses, in hosted mode.

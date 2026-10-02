@@ -57,12 +57,12 @@ if (PHP_VERSION_ID >= 80000) {
         $config = null;
     }
 
-    // Sign-in and storage go through devhub: the same config.php, database and tables.
-    if ($config !== null && $config['auth'] === 'devhub') {
-        echo "\nDatabase (as devhub)\n";
+    // Accounts and storage: the app's own database, reached through config.php.
+    if ($config !== null && $config['auth'] === 'login') {
+        echo "\nDatabase\n";
         $report(extension_loaded('pdo_mysql'), 'pdo_mysql extension loaded',
             extension_loaded('pdo_mysql') ? '' : 'Rocky/RHEL: dnf install php-mysqlnd, then restart httpd/php-fpm');
-        $path = (string) $config['devhub_config'];
+        $path = (string) $config['config_path'];
         $report(is_readable($path), 'config readable', is_readable($path) ? $path
             : "$path - copy config.example.php to it and fill in the database details");
         if (is_readable($path) && extension_loaded('pdo_mysql')) {
@@ -75,17 +75,16 @@ if (PHP_VERSION_ID >= 80000) {
                 if (!function_exists('connect')) throw new RuntimeException('no connect() to call');
                 $db = connect();
                 $report(true, 'database connects', (string) $db->query('SELECT DATABASE()')->fetchColumn());
-                foreach (['users', 'activity_log', 'apiwb_items'] as $table) {
+                foreach (['users', 'login_attempts', 'activity_log', 'items'] as $table) {
                     $found = $db->query("SHOW TABLES LIKE '$table'")->fetchColumn() !== false;
-                    $report($found, "table $table present", $found ? '' : ($table === 'apiwb_items'
-                        ? 'run: mariadb ' . (defined('DB_NAME') ? DB_NAME : 'devhub') . ' < schema.sql'
-                        : 'is APIWB_CONFIG pointing at the devhub database config?'));
+                    $report($found, "table $table present", $found ? '' : 'run: sudo mariadb < schema.sql');
                 }
+                $users = (int) $db->query('SELECT COUNT(*) FROM users')->fetchColumn();
+                echo "  \033[2minfo\033[0m  $users account(s)" . ($users === 0 ? ': the first one created becomes an admin' : '') . "\n";
             } catch (Throwable $e) {
                 $report(false, 'database connects', $e->getMessage());
             }
         }
-        echo "  \033[2minfo\033[0m  sign-in is read from devhub's PHP session: both apps must be served from the same host\n";
     }
 }
 

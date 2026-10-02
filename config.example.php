@@ -3,11 +3,11 @@ declare(strict_types=1);
 
 // Template only. Copy it to config.php in this folder (/var/www/html/API_WORKBENCH/config.php
 // on the server) and fill in the real details. config.php is gitignored and .htaccess denies
-// it to browsers. The tables live in devhub's database, so these match devhub's config.
+// it to browsers. The database is created by schema.sql; the user is created as in the README.
 const DB_HOST = 'localhost';
-const DB_USER = 'samukelo.magagula';
+const DB_USER = 'apiworkbench';
 const DB_PASS = '';
-const DB_NAME = 'devhub';
+const DB_NAME = 'apiworkbench';
 
 function connect(): PDO
 {

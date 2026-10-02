@@ -3,46 +3,78 @@
 An internal web UI for developers to **test APIs** (send GET, POST, PUT, PATCH, DELETE, HEAD and OPTIONS
 requests and inspect the responses) and **design APIs** (describe endpoints and export an OpenAPI 3 spec).
 
+A standalone application: its own database, its own accounts, no dependency on any other app.
+
+- **Accounts**: sign in or create an account. Passwords follow strict rules, sign-in is rate limited,
+  and every form is protected against cross-site forgery.
 - **Environments and `{{variables}}`**: put `{{baseUrl}}` or `{{token}}` in a request, then switch between
-  dev, UAT and prod from the picker at the top right.
+  dev, UAT and prod from the picker above the URL bar.
 - **curl in, code out**: paste a curl command to build a request; copy any request as curl, PowerShell or
   Python.
-- **Shared collections** (optional): with devhub sign-in turned on, collections and environments can be
-  saved on the server, privately or shared with everyone.
-- **Access control and audit** (optional): only people signed in to devhub can use the proxy, and every
-  call is written to devhub's activity log.
-- The same folder runs **locally** on a developer's machine or **hosted** on a shared internal server.
-- Plain PHP + plain JavaScript. No build step, no Composer, no npm.
+- **Shared collections**: save collections and environments to the database, privately or shared with
+  everyone.
+- **Audit**: every sign-in, every proxied call and every save or delete is written to the activity log.
+- Plain PHP + plain JavaScript + MariaDB. No build step, no Composer, no npm.
 
 ## Requirements
 
-- PHP **8.0+** with the **curl** extension enabled.
-- For devhub sign-in and shared collections: `pdo_mysql`, and devhub installed on the same server.
+- PHP **8.0+** with the **curl** and **pdo_mysql** extensions.
+- MariaDB (or MySQL).
 - A modern browser (Chrome, Edge, Firefox, Safari).
 
 On Rocky/RHEL with Apache: `sudo dnf install httpd php php-common php-mysqlnd` (curl ships in
 `php-common`), then `sudo systemctl restart httpd` (and `php-fpm` if PHP runs through it).
 
-On Windows: `winget install PHP.PHP.8.3`, then in `php.ini` make sure `extension=curl` is not commented out
-(run `php --ini` to find the file; copy `php.ini-development` to `php.ini` if there is none).
+On Windows: `winget install PHP.PHP.8.3`, then in `php.ini` make sure `extension=curl` and
+`extension=pdo_mysql` are not commented out (run `php --ini` to find the file).
+
+## Set up on the server
+
+1. **Put the code in place**, for example `/var/www/html/API_WORKBENCH/` (`git clone` or `git pull`).
+2. **Create the database and tables.** `schema.sql` creates the `apiworkbench` database. It is safe to
+   re-run.
+   ```sh
+   sudo mariadb < schema.sql
+   ```
+3. **Create a database user** that can only reach this database:
+   ```sql
+   CREATE USER 'apiworkbench'@'localhost' IDENTIFIED BY 'a-long-random-password';
+   GRANT SELECT, INSERT, UPDATE, DELETE ON apiworkbench.* TO 'apiworkbench'@'localhost';
+   ```
+4. **Create `config.php`** in the app folder from the template, and fill in that user's password:
+   ```sh
+   cd /var/www/html/API_WORKBENCH
+   cp config.example.php config.php
+   chmod 640 config.php && sudo chown root:apache config.php
+   vi config.php
+   ```
+5. **Check it:** `sudo -u apache php check.php`. Every line should say `ok`.
+6. **Open the app** and create the first account. **The first account created becomes an admin.**
+7. Set `APIWB_ALLOWED_HOSTS` for the internal APIs people need to reach (see Configuration).
 
 ## Configuration
 
-Configuration works the same way as devhub, in two places:
+Configuration is split in two:
 
 | File | Holds | Where it lives |
 |---|---|---|
-| `settings.php` | every setting, as constants with `APIWB_*` environment overrides | in the app, deployed with it. **Defaults are the production layout**, so a server needs no environment at all |
-| `config.php` | database credentials: `DB_*` constants and `connect(): PDO` | **in the app folder**, at `/var/www/html/API_WORKBENCH/config.php`. Gitignored, so `git pull` never touches it, and denied to browsers by `.htaccess` (PHP would also run it rather than show it). Copy `config.example.php` to create it; the details match devhub's, because the tables live in devhub's database |
+| `settings.php` | every setting, as constants with `APIWB_*` environment overrides | in the app, deployed with it. **Defaults are the production setup**, so a server needs no environment at all |
+| `config.php` | database credentials: `DB_*` constants and `connect(): PDO` | **in the app folder**, at `/var/www/html/API_WORKBENCH/config.php`. Copy it from `config.example.php`. It is gitignored, so `git pull` never touches it |
 
-Nothing secret is in the repository. The one secret file, `config.php`, sits in the app folder, and two locks keep it private: `.htaccess` denies it, and PHP would run it rather than show it. Keep `AllowOverride` on for this folder.
+Nothing secret is in the repository. The one secret file, `config.php`, sits in the app folder, and two
+locks keep it private: `.htaccess` denies it, and PHP would run it rather than show it. Keep
+`AllowOverride` on for this folder.
 
 | Variable | Default | What it is |
 |---|---|---|
 | `APIWB_CONFIG` | `config.php` in the app folder | the file defining `connect(): PDO` |
 | `APIWB_MODE` | `hosted` | `hosted` blocks loopback, private (10.x, 172.16–31.x, 192.168.x), link-local (incl. cloud metadata 169.254.169.254) and other reserved addresses unless allow-listed. `local` may call anything, including localhost |
-| `APIWB_AUTH` | `devhub` | `devhub`: devhub sign-in, database storage, audit log. `none`: anyone, browser-only storage, no database |
-| `APIWB_DEVHUB_URL` | `/devhub/` | where the "Sign in via devhub" link points |
+| `APIWB_AUTH` | `login` | `login`: accounts, database storage, audit log. `none`: anyone, browser-only storage, no database |
+| `APIWB_OWNER` | *(none)* | a username (email) that is always an admin. Without it, the first account is the admin |
+| `APIWB_REGISTRATION_KEY` | *(none)* | when set, creating an account also needs this shared secret |
+| `APIWB_EMAIL_DOMAIN` | *(none)* | when set, e.g. `@za.logicalis.com`, accounts must use an email ending in it |
+| `APIWB_LOGIN_MAX_ATTEMPTS` | `10` | failed sign-ins allowed per username and per IP in the window |
+| `APIWB_LOGIN_WINDOW` | `900` | that window, in seconds |
 | `APIWB_ALLOWED_HOSTS` | *(none)* | comma-separated hosts allowed even if they resolve to private addresses: `api.corp.local,*.dev.corp.local` |
 | `APIWB_RESTRICT_HOSTS` | *(off)* | `1`: *only* the allowed hosts can be called |
 | `APIWB_BLOCKED_HOSTS` | *(none)* | comma-separated hosts never called, in any mode |
@@ -57,15 +89,24 @@ On Apache, set overrides with `SetEnv` (needs `mod_env`, on by default), then `s
 ```apache
 <Directory "/var/www/html/API_WORKBENCH">
     SetEnv APIWB_ALLOWED_HOSTS "api.corp.local,*.dev.corp.local"
+    SetEnv APIWB_EMAIL_DOMAIN "@za.logicalis.com"
 </Directory>
 ```
 
 Apache's `SetEnv` values are not visible to a shell, so `check.php` reports the settings *its own* run
 sees. Export the same variables before running it if you want them checked too.
 
+Make sure `src/`, `bootstrap.php`, `settings.php`, `check.php`, `config*.php` and `*.sql` are not served:
+- **Apache:** the included `.htaccess` files handle this.
+- **Nginx:** `location ~ ^/(src/|(config(\.example)?|check|bootstrap|settings)\.php$|.*\.sql$|\.) { deny all; }`
+- **IIS:** add Request Filtering rules denying the same paths.
+
+Serve it over HTTPS if possible. Passwords, and the tokens typed into the Tester, pass through this server.
+The session cookie is marked `Secure` automatically on HTTPS.
+
 ## Run locally
 
-No database and no sign-in: everything is saved in the browser, and localhost can be called.
+No database and no accounts: everything is saved in the browser, and localhost can be called.
 
 ```sh
 APIWB_MODE=local APIWB_AUTH=none php -S localhost:8080
@@ -80,49 +121,31 @@ $env:APIWB_MODE = 'local'; $env:APIWB_AUTH = 'none'; php -S localhost:8080
 Open http://localhost:8080 and send a request from the Tester.
 Opening `index.html` directly from disk will not work for the Tester; it must be served by PHP.
 
-## Host on a shared server
+## Accounts, shared collections and audit
 
-1. Copy the folder into the web root, next to devhub, for example `/var/www/html/API_WORKBENCH/`.
-2. `cp config.example.php config.php` and fill in the database details (the same ones as devhub's config).
-3. Create the table (next section) and set `APIWB_ALLOWED_HOSTS` for the internal APIs people need.
-4. Make sure `src/`, `bootstrap.php`, `settings.php`, `check.php`, `config*.php` and `*.sql` are not served:
-   - **Apache:** the included `.htaccess` files handle this (`AllowOverride All` must be on).
-   - **Nginx:**
-     ```nginx
-     location ~ ^/(src/|(config(\.example)?|check|bootstrap|settings)\.php$|.*\.sql$|\.) { deny all; }
-     ```
-   - **IIS:** add Request Filtering rules denying the same paths.
-5. Serve it over HTTPS if possible. Bearer tokens and passwords typed into the Tester pass through this server.
+Opening the app while signed out goes to `login.php`, where people sign in or create an account.
 
-## Sign-in, shared collections and audit (devhub)
+- **Usernames are email addresses.** Set `APIWB_EMAIL_DOMAIN` to accept only your company's.
+- **Passwords** need at least 10 characters, with an uppercase letter, a lowercase letter, a number and a
+  special character. They are stored with `password_hash()`.
+- **Sign-in is rate limited**, per username *and* per IP: per username alone lets one machine spray many
+  accounts, per IP alone lets a distributed attempt through. A lockout message is the same whether or
+  not the account exists.
+- **Every form and every write carries a CSRF token.** Plain forms send it as a field, the app's calls as
+  an `X-CSRF-Token` header.
+- **The session cookie has its own name** (`apiwb_session`). Other PHP apps on the same host use PHP's
+  default, and sharing it would let their sign-in leak into this one.
+- **Admins** are the first account created, anyone with `users.is_admin = 1`, and `APIWB_OWNER`. To make
+  someone else an admin:
+  `UPDATE apiworkbench.users SET is_admin = 1 WHERE username = 'them@company.com';`
 
-API Workbench has no user list of its own. It reads **devhub's PHP session**: both apps run on the same
-server, so they share the session store and cookie, and anyone signed in to devhub is signed in here.
-devhub's CSRF token (kept in that session) protects this app's writes too. The database is reached the
-same way devhub reaches it: `require CONFIG_PATH`, then `connect()`.
-
-1. **Create the table**, in devhub's database. It is additive and safe to re-run. Take a dump first.
-   ```sh
-   mariadb devhub < schema.sql
-   ```
-2. **Check it:** `sudo -u apache php check.php` confirms `pdo_mysql`, the config file, the connection,
-   and the `users`, `activity_log` and `apiwb_items` tables.
-
-This is the default (`APIWB_AUTH=devhub`), so there is nothing to switch on. Once running:
-
-| | |
-|---|---|
-| **Proxy** | refuses anyone not signed in to devhub; every call needs the session's CSRF token |
-| **Audit** | every call is written to devhub's `activity_log` as `apiwb.request`, e.g. `GET https://api.corp/users -> 200`. The query string is left out because it often carries keys. Saves and deletes are logged as `apiwb.collection.save`, `apiwb.environment.delete` and so on. They appear on devhub's admin **Logs** page |
-| **Collections and environments** | can be saved on the server, either **private** (only you) or **shared** (everyone signed in) |
-
-Who can do what with server items:
+Saved collections and environments:
 
 | | Private | Shared |
 |---|---|---|
 | See and use | owner | everyone signed in |
 | Edit contents | owner | everyone signed in |
-| Rename, share or unshare, delete | owner | owner or a devhub admin |
+| Rename, share or unshare, delete | owner | owner or an admin |
 
 Two people editing the same shared item cannot silently overwrite each other. Every save carries the
 version it was loaded at. A save made after someone else's is refused, with a message naming who saved
@@ -131,13 +154,26 @@ and a prompt to reload.
 **Shared environments are readable by everyone signed in, tokens included.** Keep personal tokens in a
 private environment, or in one stored in your browser.
 
+The `activity_log` table records:
+
+| `action` | `detail` |
+|---|---|
+| `register`, `login`, `logout` | |
+| `login.failed`, `login.blocked` | the client IP |
+| `apiwb.request` | `GET https://api.corp/users -> 200`. The query string is left out because it often carries keys |
+| `apiwb.collection.save` / `.delete`, `apiwb.environment.save` / `.delete` | which item |
+
+```sql
+SELECT created_at, username, action, detail FROM apiworkbench.activity_log ORDER BY id DESC LIMIT 50;
+```
+
 ## Environments and variables
 
 Write `{{name}}` anywhere in the URL, query params, headers, Auth fields or body. Pick an environment from
 the **Environment** picker above the URL bar, and the values are filled in when the request is sent.
 
-- **Manage** creates and edits environments. Each is stored in this browser, or on the server (private or
-  shared) when devhub sign-in is on.
+- **Manage** creates and edits environments. Each is stored in this browser, or in the database (private
+  or shared).
 - Under the URL bar, a preview line shows what the URL resolves to, or which variables have no value.
 - A request with an unfilled variable is not sent. The error names the variable.
 - Saved requests and history keep the `{{variables}}`, so the same request works against every environment.
@@ -154,30 +190,32 @@ the **Environment** picker above the URL bar, and the values are filled in when 
 ## How it works
 
 ```
-Browser (index.html + js/)                       PHP
-  Tester ── POST proxy.php {method,url,...} ──▶  proxy.php  sign-in + CSRF (APIWB_AUTH=devhub)
-                                                   ProxyRequest  validate input
-                                                   HostPolicy    check host against config, resolve DNS once
-                                                   Forwarder     send with cURL pinned to that IP
-                                                   activity_log  who sent what (APIWB_AUTH=devhub)
-         ◀── {status, headers, body, timeMs} ──
-  Saved / environments ── api.php ─────────────▶  api.php    Auth (devhub session) + ItemStore (apiwb_items)
-  Designer ── runs entirely in the browser (js/openapi.js converts to/from OpenAPI 3)
+Browser                                            PHP
+  login.php ── POST auth.php ──────────────────▶  auth.php     sign in / create account / sign out
+  index.html + js/
+    Tester ── POST proxy.php {method,url,...} ──▶  proxy.php   session + CSRF check
+                                                    ProxyRequest  validate input
+                                                    HostPolicy    check host against settings, resolve DNS once
+                                                    Forwarder     send with cURL pinned to that IP
+                                                    activity_log  who sent what
+           ◀── {status, headers, body, timeMs} ──
+    Saved / environments ── api.php ─────────────▶  api.php     Auth + ItemStore (items table)
+    Designer ── runs entirely in the browser (js/openapi.js converts to/from OpenAPI 3)
 ```
 
 - The browser cannot call most APIs directly because of CORS. That's why requests go through `proxy.php`.
 - Redirects are **shown, not followed**, so every hop gets checked by the host policy. Copy the `Location`
   header into the URL bar to follow one.
-- Both endpoints only accept JSON POSTs from their own page (Origin check). If you put them behind a reverse
-  proxy that rewrites `Host`, make sure the original `Host` header is passed through.
-- The devhub session is opened only long enough to read who is signed in, then released. A slow proxied
-  call therefore never holds up devhub in another tab.
+- Both JSON endpoints only accept JSON POSTs from their own page (Origin check). If you put them behind a
+  reverse proxy that rewrites `Host`, make sure the original `Host` header is passed through.
+- The session is opened only long enough to read who is signed in, then released, so a slow proxied call
+  never blocks the user's other requests.
 
 ## Troubleshooting
 
-**Start with the health check.** It reports the PHP version, curl, the config, whether every PHP file
-parses on this PHP, and (unless `APIWB_AUTH=none`) the database connection and tables. Run it as the user the
-web server runs as:
+**Start with the health check.** It reports the PHP version, the extensions, the settings, whether every
+PHP file parses on this PHP, and (unless `APIWB_AUTH=none`) `config.php`, the connection, the tables and
+how many accounts exist. Run it as the user the web server runs as:
 
 ```sh
 sudo -u apache php check.php     # Linux server
@@ -191,9 +229,9 @@ php check.php                    # local
 | Shown | Meaning | Look at |
 |---|---|---|
 | `SERVER_ERROR` / `Fatal: ...` | PHP reached the endpoint and crashed. The message names the file and line | `php check.php` |
-| `CONFIG_ERROR` | PHP too old, curl missing, a setting invalid, or the database config unreadable | `php check.php` |
-| `NOT_SIGNED_IN` | you are not signed in to devhub | sign in to devhub, then reload |
-| `CSRF` | the page's session token is stale (signed out and in again elsewhere) | reload the page |
+| `CONFIG_ERROR` | PHP too old, curl missing, a setting invalid, or `config.php` missing or unreadable | `php check.php` |
+| `NOT_SIGNED_IN` | the session ended | sign in again |
+| `CSRF` | the page's session token is stale | reload the page |
 | `CONFLICT` | someone saved the same shared collection or environment after you loaded it | reload, then redo your change |
 | `MISSING_VARIABLES` | a `{{variable}}` has no value in the chosen environment | the Environment picker, or **Manage** |
 | `URL_NOT_ALLOWED` | hosted mode refused the host | `APIWB_ALLOWED_HOSTS` |
@@ -208,18 +246,27 @@ comes from Apache, not the app. Common causes:
   `index.html` loads at all.
 - The page was opened from disk (`file://`) instead of through the web server.
 
-**Signed in to devhub, but this app says you are not.** The two apps must share a host name: a session
-cookie set for `devhub.corp` is not sent to `tools.corp`. They must also share PHP's session store (the
-same `session.save_path`, true for two folders under one Apache).
+**Sign-in page shows "Cannot read the database config".** `config.php` is missing or the web server user
+cannot read it. Create it from `config.example.php` (step 4 above).
 
 ## Project layout
 
 ```
-index.html            page shell
+index.html            the app (redirects to login.php when signed out)
+login.php             sign-in and create-account page
+auth.php              handles sign-in, account creation and sign-out
+proxy.php             sends requests
+api.php               who is signed in; saved collections and environments
+bootstrap.php         shared start of the JSON endpoints: error nets, PHP version check (not served)
+settings.php          every setting, with APIWB_* environment overrides (not served)
+config.example.php    template for config.php (database details), which stays in the app folder, gitignored
+schema.sql            creates the apiworkbench database and its tables (not served)
+check.php             command-line health check (not served)
+src/                  server classes: Session, Auth, ItemStore, proxy classes (not web-accessible)
 css/app.css           styles
 js/app.js             entry point: sign-in state, tab switching
 js/tester.js          Tester tab
-js/collections.js     saved-request collections (browser + server)
+js/collections.js     saved-request collections (browser + database)
 js/environments.js    environments, the picker, the editor
 js/variables.js       {{variable}} substitution
 js/curl.js            curl command -> request
@@ -230,21 +277,14 @@ js/openapi.js         designer model <-> OpenAPI 3, validation, "Try it"
 js/kvtable.js         editable name/value table
 js/dom.js, storage.js helpers (DOM, modal, toast, localStorage)
 vendor/js-yaml.min.js YAML support (MIT)
-proxy.php             sends requests
-api.php               sign-in state, shared collections and environments
-bootstrap.php         shared start of both endpoints: JSON error nets, PHP version check (not served)
-check.php             command-line health check (not served)
-schema.sql            the apiwb_items table, for devhub's database (not served)
-src/                  server classes (not web-accessible)
-settings.php          every setting, with APIWB_* environment overrides (not served)
-config.example.php    template for config.php (database details), which stays in the app folder, gitignored
 ```
 
 ## Limits of this version
 
+- No password reset by email; an admin resets one in the database (`password_hash` a new one).
+- No admin screen yet: user admin rights and the activity log are managed with SQL.
 - No multipart file uploads, cookie jar, or WebSockets.
-- Signing in happens on devhub's page. There is no sign-in form here.
-- Only one browser-only collection ("This browser"). Create more as server collections.
-- The Designer still saves to the browser only, not to the server.
+- Only one browser-only collection ("This browser"). Create more as database collections.
+- The Designer still saves to the browser only, not to the database.
 - The Designer describes bodies by example (the schema is inferred). Importing an OpenAPI file keeps paths,
   operations, parameters and examples. Shared `components` are inlined, and security schemes are not imported.

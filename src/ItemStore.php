@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * Collections and environments saved on the server, in the apiwb_items table.
+ * Collections and environments saved on the server, in the items table.
  *
  * Who can do what:
  *   private item  - its owner only
@@ -25,7 +25,7 @@ final class ItemStore
         $stmt = $this->db->prepare(
             'SELECT i.id, i.name, i.shared, i.version, i.content, i.updated_at, i.owner_id,
                     o.username AS owner, u.username AS updated_by
-               FROM apiwb_items i
+               FROM items i
                JOIN users o ON o.id = i.owner_id
                LEFT JOIN users u ON u.id = i.updated_by
               WHERE i.kind = ? AND (i.owner_id = ? OR i.shared = 1)
@@ -54,7 +54,7 @@ final class ItemStore
         $id = (int) ($data['id'] ?? 0);
         if ($id === 0) {
             $this->db->prepare(
-                'INSERT INTO apiwb_items (kind, name, owner_id, shared, content, version, updated_by)
+                'INSERT INTO items (kind, name, owner_id, shared, content, version, updated_by)
                  VALUES (?, ?, ?, ?, ?, 1, ?)'
             )->execute([$kind, $name, $userId, $shared ? 1 : 0, $json, $userId]);
             return $this->find((int) $this->db->lastInsertId(), $userId);
@@ -73,7 +73,7 @@ final class ItemStore
                     . 'Reload to get their version, then make your change again.', 409);
             }
             $this->db->prepare(
-                'UPDATE apiwb_items SET name = ?, shared = ?, content = ?, version = version + 1, updated_by = ?
+                'UPDATE items SET name = ?, shared = ?, content = ?, version = version + 1, updated_by = ?
                   WHERE id = ?'
             )->execute([$name, $shared ? 1 : 0, $json, $userId, $id]);
             $this->db->commit();
@@ -93,7 +93,7 @@ final class ItemStore
             if ((int) $row['owner_id'] !== $userId && !$isAdmin) {
                 throw new ProxyException('FORBIDDEN', 'Only the owner or an admin can delete this.', 403);
             }
-            $this->db->prepare('DELETE FROM apiwb_items WHERE id = ?')->execute([$id]);
+            $this->db->prepare('DELETE FROM items WHERE id = ?')->execute([$id]);
             $this->db->commit();
         } catch (Throwable $e) {
             if ($this->db->inTransaction()) $this->db->rollBack();
@@ -107,7 +107,7 @@ final class ItemStore
     {
         $stmt = $this->db->prepare(
             'SELECT i.*, u.username AS updated_by_name
-               FROM apiwb_items i LEFT JOIN users u ON u.id = i.updated_by
+               FROM items i LEFT JOIN users u ON u.id = i.updated_by
               WHERE i.id = ? AND i.kind = ? AND (i.owner_id = ? OR i.shared = 1)
               FOR UPDATE'
         );
@@ -124,7 +124,7 @@ final class ItemStore
         $stmt = $this->db->prepare(
             'SELECT i.id, i.name, i.shared, i.version, i.content, i.updated_at, i.owner_id,
                     o.username AS owner, u.username AS updated_by
-               FROM apiwb_items i
+               FROM items i
                JOIN users o ON o.id = i.owner_id
                LEFT JOIN users u ON u.id = i.updated_by
               WHERE i.id = ?'

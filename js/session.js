@@ -1,7 +1,7 @@
-// Who is signed in (via devhub) and calls to api.php.
+// Who is signed in, and calls to api.php.
 //
 // With auth = 'none' on the server, nobody signs in and everything stays in the browser;
-// with auth = 'devhub', this holds the user and the CSRF token every write must carry.
+// with auth = 'login', this holds the user and the CSRF token every write must carry.
 
 export const session = {
   auth: 'none',
@@ -35,7 +35,7 @@ export async function loadSession() {
 }
 
 /** True when collections and environments can be saved on the server. */
-export const serverStorage = () => session.auth === 'devhub' && session.signedIn && session.storageOk;
+export const serverStorage = () => session.auth === 'login' && session.signedIn && session.storageOk;
 
 /** Headers every state-changing call to this app's PHP must carry. */
 export const csrfHeaders = () => (session.csrfToken ? { 'X-CSRF-Token': session.csrfToken } : {});

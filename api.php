@@ -9,7 +9,7 @@ declare(strict_types=1);
 //   POST api.php?action=collection_delete    {id}
 //   ...and the same three for environment(s).
 //
-// Everything except "me" needs devhub sign-in (the default; APIWB_AUTH=none turns it off).
+// Everything except "me" needs a signed-in user (the default; APIWB_AUTH=none turns it off).
 
 require __DIR__ . '/bootstrap.php';
 require __DIR__ . '/src/ItemStore.php';
@@ -30,7 +30,7 @@ try {
             // page, not as a sign-in that silently cannot save anything.
             try {
                 $isAdmin = $auth->isAdmin($user['id']);
-                $auth->db()->query('SELECT 1 FROM apiwb_items LIMIT 1');
+                $auth->db()->query('SELECT 1 FROM items LIMIT 1');
                 $storage['ok'] = true;
             } catch (Throwable $e) {
                 $storage['error'] = $e->getMessage();
@@ -43,7 +43,7 @@ try {
             'username' => $user['username'] ?? null,
             'isAdmin' => $isAdmin,
             'csrfToken' => $auth->csrfToken(),
-            'loginUrl' => $config['devhub_url'],
+            'loginUrl' => 'login.php',
             'storage' => $storage,
         ]);
     }

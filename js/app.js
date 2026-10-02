@@ -15,17 +15,28 @@ function showView(view) {
   save('view', view);
 }
 
-/** Top right: who is signed in, or a way to sign in. Empty when the install has no sign-in. */
+/** Top right: who is signed in, and a way out. Empty when the install has no sign-in. */
 function renderHeaderUser() {
   const box = $('#header-user');
-  if (session.auth !== 'devhub') return box.replaceChildren();
-  box.replaceChildren(session.signedIn
-    ? h('span', { class: 'welcome' }, 'Signed in as ', h('strong', { text: session.username }))
-    : h('a', { class: 'btn small btn-ghost-light', href: session.loginUrl, target: '_blank', rel: 'noopener', text: 'Sign in via devhub' }));
+  if (session.auth !== 'login' || !session.signedIn) return box.replaceChildren();
+  // Signing out is a state change, so it is a POST carrying the CSRF token, like sign-in.
+  box.replaceChildren(
+    h('span', { class: 'welcome' }, 'Signed in as ', h('strong', { text: session.username })),
+    h('form', { method: 'post', action: 'auth.php' },
+      h('input', { type: 'hidden', name: 'action', value: 'logout' }),
+      h('input', { type: 'hidden', name: 'csrf_token', value: session.csrfToken }),
+      h('button', { type: 'submit', class: 'btn small btn-ghost-light', text: 'Sign out' })),
+  );
 }
 
 async function start() {
   await loadSession();
+  // The page itself holds nothing private, but there is nothing to do here signed out:
+  // the proxy and storage both refuse. Go to the sign-in page instead.
+  if (session.auth === 'login' && !session.signedIn) {
+    window.location.replace(session.loginUrl || 'login.php');
+    return;
+  }
   renderHeaderUser();
   await Promise.all([refreshServerCollections(), refreshServerEnvironments()]);
 

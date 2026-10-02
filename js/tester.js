@@ -221,7 +221,7 @@ function renderCollectionBar() {
     if (current.scope === 'shared') {
       children.push(h('p', { class: 'hint', text: `Shared by ${current.owner}${current.updatedBy ? ` · last saved by ${current.updatedBy}` : ''}` }));
     }
-  } else if (session.auth === 'devhub' && session.signedIn && session.storageError) {
+  } else if (session.auth === 'login' && session.signedIn && session.storageError) {
     children.push(h('p', { class: 'hint error', text: `Server collections unavailable: ${session.storageError}` }));
   }
   bar.replaceChildren(...children);
@@ -627,7 +627,7 @@ function showResponse(data) {
       h('span', { class: 'status err', text: data.error?.code || 'ERROR' }),
       h('span', { text: data.error?.message || 'Unknown error' }),
       data.error?.code === 'NOT_SIGNED_IN' && session.loginUrl
-        ? h('a', { class: 'btn small primary', href: session.loginUrl, target: '_blank', rel: 'noopener', text: 'Sign in to devhub' })
+        ? h('a', { class: 'btn small primary', href: session.loginUrl, text: 'Sign in' })
         : null,
     ].filter(Boolean));
     tabs.classList.add('hidden');

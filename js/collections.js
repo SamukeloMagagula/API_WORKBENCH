@@ -1,7 +1,7 @@
 // Collections of saved requests.
 //
 // "This browser" is always there and lives in localStorage (it holds what the Saved
-// list held before collections existed). With auth = 'devhub' there are also server
+// list held before collections existed). With sign-in on there are also server
 // collections, private to their owner or shared with everyone signed in.
 //
 // A collection here: { key, name, scope: 'local'|'private'|'shared', requests: [{id, name, request}],
