@@ -108,6 +108,12 @@
           <span class="spacer"></span>
           <label class="check small"><input type="checkbox" id="res-raw"> Raw</label>
           <button class="btn small" id="btn-copy-response">Copy</button>
+          <div class="zoom" role="group" aria-label="Text size">
+            <button class="btn small" id="btn-zoom-out" title="Smaller text">A−</button>
+            <button class="zoom-level" id="btn-zoom-reset" title="Reset text size">100%</button>
+            <button class="btn small" id="btn-zoom-in" title="Larger text">A+</button>
+          </div>
+          <button class="btn small" id="btn-expand-response" title="Show the response full screen (Esc closes)">Expand</button>
         </div>
         <div class="pane" data-group="res" data-pane="body"><pre id="res-body" class="code-view"></pre></div>
         <div class="pane hidden" data-group="res" data-pane="headers"><table class="kv-view" id="res-headers"></table></div>

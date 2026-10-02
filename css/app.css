@@ -214,6 +214,29 @@ label.check.small { font-size: 12.5px; }
 .j-num { color: #b31d28; }
 .j-bool, .j-null { color: #d73a49; font-weight: 600; }
 
+/* Response text size: tester.js sets --res-font; everything inside scales from it */
+.response .code-view, .response .kv-view { font-size: var(--res-font, 13px); }
+.response .kv-view td:last-child { font-size: .96em; }
+.zoom { display: inline-flex; align-items: center; gap: 2px; margin-left: 8px; }
+.zoom .btn { margin-left: 0; min-width: 34px; }
+.zoom-level {
+    min-width: 46px; border: none; background: none; cursor: pointer; padding: 4px 2px;
+    font: inherit; font-size: 12px; font-weight: 600; color: var(--ink-soft); font-variant-numeric: tabular-nums;
+}
+.zoom-level:hover { color: var(--red); }
+
+/* Expanded response: fills the window, panes scroll inside it, Esc closes */
+.response.expanded {
+    position: fixed; inset: 16px; z-index: 60; margin: 0;
+    box-shadow: 0 16px 48px rgba(0,0,0,.18);
+}
+.response.expanded .pane:not(.hidden) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.response.expanded .code-view { flex: 1; max-height: none; }
+.response.expanded .pane[data-group="res"][data-pane="headers"] { max-height: none; overflow: auto; }
+body.res-expanded::after {
+    content: ""; position: fixed; inset: 0; z-index: 59; background: rgba(17,18,20,.55);
+}
+
 /* ---- Designer ---- */
 #api-info { display: flex; flex-direction: column; gap: 10px; }
 #api-info textarea { font-size: 13px; }

@@ -418,6 +418,7 @@ function showResponse(data) {
       h('span', { text: data.error?.message || 'Unknown error' }),
     );
     tabs.classList.add('hidden');
+    setExpanded(false); // the toolbar holding "Close" is hidden for errors
     $('#res-body').textContent = '';
     $('#res-headers').replaceChildren();
     showPane('res', 'body');
@@ -495,6 +496,48 @@ function copyResponse() {
   copyText(text);
 }
 
+// ---------------------------------------------------------------- response zoom + expand
+
+const ZOOM_STEPS = [0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5];
+const BASE_FONT_PX = 13;
+
+function applyZoom(zoom) {
+  $('#response-panel').style.setProperty('--res-font', `${BASE_FONT_PX * zoom}px`);
+  $('#btn-zoom-reset').textContent = `${Math.round(zoom * 100)}%`;
+  $('#btn-zoom-out').disabled = zoom <= ZOOM_STEPS[0];
+  $('#btn-zoom-in').disabled = zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1];
+  save('responseZoom', zoom);
+}
+
+function setExpanded(expanded) {
+  $('#response-panel').classList.toggle('expanded', expanded);
+  document.body.classList.toggle('res-expanded', expanded);
+  $('#btn-expand-response').textContent = expanded ? 'Close' : 'Expand';
+}
+
+function wireResponseZoom() {
+  let zoom = load('responseZoom', 1);
+  if (!ZOOM_STEPS.includes(zoom)) zoom = 1;
+  applyZoom(zoom);
+
+  const step = (direction) => {
+    const i = ZOOM_STEPS.indexOf(zoom) + direction;
+    if (i < 0 || i >= ZOOM_STEPS.length) return;
+    zoom = ZOOM_STEPS[i];
+    applyZoom(zoom);
+  };
+  $('#btn-zoom-in').addEventListener('click', () => step(1));
+  $('#btn-zoom-out').addEventListener('click', () => step(-1));
+  $('#btn-zoom-reset').addEventListener('click', () => { zoom = 1; applyZoom(zoom); });
+
+  $('#btn-expand-response').addEventListener('click', () => {
+    setExpanded(!$('#response-panel').classList.contains('expanded'));
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && $('#response-panel').classList.contains('expanded')) setExpanded(false);
+  });
+}
+
 // ---------------------------------------------------------------- wiring
 
 export function initTester() {
@@ -548,6 +591,7 @@ export function initTester() {
 
   $('#res-raw').addEventListener('change', renderResponseBody);
   $('#btn-copy-response').addEventListener('click', copyResponse);
+  wireResponseZoom();
 
   $('#side-tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('.seg-btn');
