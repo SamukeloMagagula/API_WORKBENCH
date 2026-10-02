@@ -204,6 +204,10 @@ function renderSide() {
       h('span', { class: 'label' },
         item.request.url.replace(/^https?:\/\//, ''),
         h('div', { class: 'sub', text: `${item.status} · ${timeAgo(item.at)}` })),
+      h('button', {
+        class: 'btn icon remove', title: 'Remove from history', text: '×',
+        onclick: (e) => { e.stopPropagation(); deleteHistory(item.id); },
+      }),
       )) : [h('li', { class: 'empty', text: 'Requests you send appear here.' })]),
     );
   }
@@ -270,6 +274,13 @@ function deleteSaved(id) {
   saved = saved.filter((x) => x.id !== id);
   save('saved', saved);
   if (currentSavedId === id) currentSavedId = null;
+  renderSide();
+}
+
+// No confirm: a history entry is a record of something already sent, cheap to lose.
+function deleteHistory(id) {
+  history = history.filter((x) => x.id !== id);
+  save('history', history);
   renderSide();
 }
 
