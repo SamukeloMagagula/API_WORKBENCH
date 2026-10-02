@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API Workbench</title>
+  <link rel="stylesheet" href="css/app.css">
+  <script src="vendor/js-yaml.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">API Workbench</div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="tester" role="tab">Tester</button>
+      <button class="tab" data-view="designer" role="tab">Designer</button>
+    </nav>
+    <span id="mode-badge" class="badge" title="Server mode">…</span>
+  </header>
+
+  <!-- ===================== TESTER ===================== -->
+  <main id="view-tester" class="view tester">
+    <aside class="sidebar">
+      <div class="seg" id="side-tabs">
+        <button class="seg-btn active" data-side="saved">Saved</button>
+        <button class="seg-btn" data-side="history">History</button>
+      </div>
+      <div class="side-actions" id="saved-actions">
+        <button class="btn small" id="btn-new-request">New</button>
+        <button class="btn small" id="btn-import-saved">Import</button>
+        <button class="btn small" id="btn-export-saved">Export</button>
+      </div>
+      <div class="side-actions hidden" id="history-actions">
+        <button class="btn small" id="btn-clear-history">Clear history</button>
+      </div>
+      <ul class="list" id="side-list"></ul>
+    </aside>
+
+    <section class="workspace">
+      <div class="request-name" id="request-name">Untitled request</div>
+      <form class="request-bar" id="request-form" autocomplete="off">
+        <select id="req-method" class="method-select">
+          <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option>
+          <option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+        </select>
+        <input id="req-url" class="url-input" type="text" placeholder="https://api.example.com/users?page=1" spellcheck="false">
+        <button type="submit" class="btn primary" id="btn-send">Send</button>
+        <button type="button" class="btn" id="btn-save">Save</button>
+      </form>
+
+      <div class="panel">
+        <div class="subtabs" data-group="req">
+          <button class="subtab active" data-pane="params">Params</button>
+          <button class="subtab" data-pane="headers">Headers <span class="count" id="headers-count"></span></button>
+          <button class="subtab" data-pane="auth">Auth</button>
+          <button class="subtab" data-pane="body">Body</button>
+        </div>
+        <div class="pane" data-group="req" data-pane="params"><div id="params-table"></div></div>
+        <div class="pane hidden" data-group="req" data-pane="headers"><div id="headers-table"></div></div>
+        <div class="pane hidden" data-group="req" data-pane="auth">
+          <div class="form-row">
+            <label>Type
+              <select id="auth-type">
+                <option value="none">No auth</option>
+                <option value="bearer">Bearer token</option>
+                <option value="basic">Basic auth</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-row hidden" id="auth-bearer">
+            <label class="grow">Token <input id="auth-token" type="text" spellcheck="false"></label>
+          </div>
+          <div class="form-row hidden" id="auth-basic">
+            <label class="grow">Username <input id="auth-username" type="text" spellcheck="false"></label>
+            <label class="grow">Password <input id="auth-password" type="password"></label>
+          </div>
+          <p class="hint">Sent as an <code>Authorization</code> header, unless you set one yourself under Headers.</p>
+        </div>
+        <div class="pane hidden" data-group="req" data-pane="body">
+          <div class="form-row">
+            <div class="seg" id="body-type">
+              <button type="button" class="seg-btn active" data-body="none">None</button>
+              <button type="button" class="seg-btn" data-body="json">JSON</button>
+              <button type="button" class="seg-btn" data-body="form">Form</button>
+              <button type="button" class="seg-btn" data-body="text">Text</button>
+            </div>
+            <button type="button" class="btn small hidden" id="btn-format-body">Format JSON</button>
+            <span class="hint" id="body-status"></span>
+          </div>
+          <textarea id="body-text" class="code hidden" spellcheck="false" rows="12"></textarea>
+          <div id="body-form-table" class="hidden"></div>
+        </div>
+      </div>
+
+      <div class="panel response" id="response-panel">
+        <div class="response-meta" id="response-meta">
+          <span class="muted">Send a request to see the response. Tip: Ctrl+Enter sends.</span>
+        </div>
+        <div class="subtabs hidden" data-group="res" id="response-tabs">
+          <button class="subtab active" data-pane="body">Body</button>
+          <button class="subtab" data-pane="headers">Headers <span class="count" id="res-headers-count"></span></button>
+          <span class="spacer"></span>
+          <label class="check small"><input type="checkbox" id="res-raw"> Raw</label>
+          <button class="btn small" id="btn-copy-response">Copy</button>
+        </div>
+        <div class="pane" data-group="res" data-pane="body"><pre id="res-body" class="code-view"></pre></div>
+        <div class="pane hidden" data-group="res" data-pane="headers"><table class="kv-view" id="res-headers"></table></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== DESIGNER ===================== -->
+  <main id="view-designer" class="view designer hidden">
+    <aside class="sidebar">
+      <div class="side-actions">
+        <select id="api-select" class="grow"></select>
+      </div>
+      <div class="side-actions">
+        <button class="btn small" id="btn-new-api">New API</button>
+        <button class="btn small" id="btn-import-api">Import</button>
+        <button class="btn small danger" id="btn-delete-api">Delete</button>
+      </div>
+      <div id="api-info"></div>
+      <div class="side-heading">
+        <span>Endpoints</span>
+        <button class="btn small" id="btn-add-endpoint">+ Add</button>
+      </div>
+      <ul class="list" id="endpoint-list"></ul>
+    </aside>
+
+    <section class="workspace" id="endpoint-editor"></section>
+
+    <section class="preview">
+      <div class="preview-bar">
+        <div class="seg" id="preview-format">
+          <button class="seg-btn active" data-format="yaml">YAML</button>
+          <button class="seg-btn" data-format="json">JSON</button>
+        </div>
+        <span class="spacer"></span>
+        <button class="btn small" id="btn-copy-spec">Copy</button>
+        <button class="btn small primary" id="btn-download-spec">Download</button>
+      </div>
+      <ul class="problems" id="problems"></ul>
+      <pre id="spec-preview" class="code-view"></pre>
+    </section>
+  </main>
+
+  <input type="file" id="file-input" class="hidden">
+  <div id="toast" class="toast hidden" role="status"></div>
+</body>
+</html>
