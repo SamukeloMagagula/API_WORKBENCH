@@ -16,13 +16,13 @@ final class ProxyRequest
      * @param list<array{name:string,value:string}> $headers
      */
     private function __construct(
-        public readonly string $method,
-        public readonly string $url,
-        public readonly string $scheme,
-        public readonly string $host,
-        public readonly int $port,
-        public readonly array $headers,
-        public readonly ?string $body,
+        public string $method,
+        public string $url,
+        public string $scheme,
+        public string $host,
+        public int $port,
+        public array $headers,
+        public ?string $body,
     ) {
     }
 

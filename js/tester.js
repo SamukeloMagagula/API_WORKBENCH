@@ -361,11 +361,17 @@ async function send() {
       body: JSON.stringify(outgoing),
       signal: controller.signal,
     });
+    // proxy.php answers JSON even on fatals, so anything else never reached it:
+    // the web server itself refused (bad .htaccess, PHP not wired up) or PHP is not running.
+    const text = await res.text();
     let data;
     try {
-      data = await res.json();
+      data = JSON.parse(text);
     } catch {
-      throw new Error(`The proxy answered HTTP ${res.status} without JSON. Is this page being served by PHP?`);
+      const snippet = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+      throw new Error(`proxy.php answered HTTP ${res.status} without JSON, so the request never reached the proxy code. `
+        + (snippet ? `The server said: “${snippet}”. ` : 'The body was empty. ')
+        + 'Check the web server error log; see Troubleshooting in the README.');
     }
     showResponse(data);
     addHistory(outgoing.url, data.ok ? String(data.status) : data.error?.code || 'ERROR');

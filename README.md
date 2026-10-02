@@ -10,8 +10,11 @@ requests and inspect the responses) and **design APIs** (describe endpoints and 
 
 ## Requirements
 
-- PHP **8.1+** with the **curl** extension enabled.
+- PHP **8.0+** with the **curl** extension enabled.
 - A modern browser (Chrome, Edge, Firefox, Safari).
+
+On Rocky/RHEL with Apache: `sudo dnf install httpd php php-common` (curl ships in `php-common`), then
+`sudo systemctl restart httpd` (and `php-fpm` if PHP runs through it).
 
 On Windows: `winget install PHP.PHP.8.3`, then in `php.ini` make sure `extension=curl` is not commented out
 (run `php --ini` to find the file; copy `php.ini-development` to `php.ini` if there is none).
@@ -72,6 +75,36 @@ Browser (index.html + js/)                       PHP (proxy.php + src/)
   that rewrites `Host`, make sure the original `Host` header is passed through.
 - Nothing is logged except unexpected server errors (to the PHP error log, without request contents).
 
+## Troubleshooting
+
+**Start with the health check.** It reports the PHP version, curl, the config, and whether every PHP
+file parses on this PHP. Run it as the user the web server runs as:
+
+```sh
+sudo -u apache php check.php     # Linux server
+php check.php                    # local
+```
+
+`check.php` only runs from the command line. Over HTTP it answers 404, and `.htaccess` denies it.
+
+**What the error in the Tester means:**
+
+| Shown | Meaning | Look at |
+|---|---|---|
+| `SERVER_ERROR` / `Fatal: ...` | PHP reached `proxy.php` and crashed. The message names the file and line | `php check.php` |
+| `CONFIG_ERROR` | PHP too old, curl missing, or `config.php` invalid | `php check.php` |
+| `URL_NOT_ALLOWED` | hosted mode refused the host | `allowed_hosts` in `config.php` |
+| `CONNECTION_FAILED` / `TIMEOUT` / `TLS_ERROR` | the proxy ran, the target API did not answer | the target, from the server: `curl -v <url>` |
+| `NETWORK_ERROR` ... *without JSON* | the request never reached the proxy code. The web server refused it, or PHP is not wired up | the web server error log (`/var/log/httpd/error_log`, or the `php -S` terminal) |
+
+`proxy.php` answers in JSON even when it crashes, so a response *without* JSON almost always comes from
+Apache, not the app. Common causes:
+
+- PHP is not handling `.php` files for this directory.
+- `AllowOverride` forbids a directive in `.htaccess`. The whole folder then answers 500, so check whether
+  `index.html` loads at all.
+- The page was opened from disk (`file://`) instead of through the web server.
+
 ## Project layout
 
 ```
@@ -85,6 +118,7 @@ js/kvtable.js         editable name/value table
 js/dom.js, storage.js helpers
 vendor/js-yaml.min.js YAML support (MIT)
 proxy.php             the only server endpoint
+check.php             command-line health check (not served)
 src/                  proxy classes (not web-accessible)
 config.example.php    configuration template
 ```

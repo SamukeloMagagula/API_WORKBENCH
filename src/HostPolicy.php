@@ -7,7 +7,7 @@ declare(strict_types=1);
  */
 final class HostPolicy
 {
-    public function __construct(private readonly array $config)
+    public function __construct(private array $config)
     {
     }
 

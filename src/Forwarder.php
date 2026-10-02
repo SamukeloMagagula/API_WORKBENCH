@@ -4,7 +4,7 @@ declare(strict_types=1);
 /** Sends a ProxyRequest with cURL and returns the response as plain data for JSON. */
 final class Forwarder
 {
-    public function __construct(private readonly array $config)
+    public function __construct(private array $config)
     {
     }
 
