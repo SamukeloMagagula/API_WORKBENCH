@@ -25,7 +25,7 @@ On Windows: `winget install PHP.PHP.8.3`, then in `php.ini` make sure `extension
 php -S localhost:8080
 ```
 
-Open http://localhost:8080. The badge in the top-right should say **Local mode**.
+Open http://localhost:8080 and send a request from the Tester.
 Opening `index.html` directly from disk will not work for the Tester; it must be served by PHP.
 
 ## Host on a shared server
@@ -110,7 +110,7 @@ Apache, not the app. Common causes:
 ```
 index.html            page shell
 css/app.css           styles (light and dark)
-js/app.js             entry point, tab switching, server-mode badge
+js/app.js             entry point, tab switching
 js/tester.js          Tester tab
 js/designer.js        Designer tab
 js/openapi.js         designer model <-> OpenAPI 3, validation, "Try it"

@@ -1,4 +1,4 @@
-/* ---- API Workbench styles: the LOGICALIS PLATFORM look (system font stack, no external assets) ---- */
+/* ---- API Workbench styles (system font stack, no external assets) ---- */
 :root {
     --black: #111111; --white: #ffffff; --red: #d6001c; --red-dark: #a80016;
     --ink: #18181b; --ink-soft: #52525b;
@@ -36,13 +36,10 @@ code { font-family: var(--mono); font-size: .9em; background: var(--grey-200); b
     background: var(--header); color: var(--white); border-bottom: 2px solid var(--red);
 }
 .brand-mark { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
-#brand-logo { height: 24px; width: auto; }
-/* Wordmark lockup: red accent bar | LOGICALIS | hairline rule | API WORKBENCH */
+/* Wordmark: red accent bar | API WORKBENCH */
 .wordmark { display: flex; align-items: center; gap: 10px; line-height: 1; white-space: nowrap; }
 .wordmark::before { content: ""; width: 3px; height: 19px; border-radius: 2px; background: var(--red); flex-shrink: 0; }
 .wm-name { font-size: 16px; font-weight: 600; letter-spacing: .02em; color: var(--white); }
-.wm-rule { width: 1px; height: 13px; background: var(--red); opacity: .6; }
-.wm-sub { font-size: 12px; font-weight: 500; letter-spacing: .14em; color: var(--grey-300); }
 
 .tabs { display: flex; gap: 4px; flex: 1; align-self: stretch; }
 .tab {
@@ -54,14 +51,6 @@ code { font-family: var(--mono); font-size: .9em; background: var(--grey-200); b
 .tab:hover { color: var(--white); }
 .tab.active { color: var(--white); font-weight: 600; border-bottom-color: var(--red); }
 
-.badge {
-    font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-    padding: 3px 10px; border-radius: 20px; flex-shrink: 0;
-    color: var(--grey-300); border: 1px solid rgba(255,255,255,.28);
-}
-.badge.local  { color: #86efac; border-color: rgba(134,239,172,.5); }
-.badge.hosted { color: #fcd34d; border-color: rgba(252,211,77,.5); }
-.badge.error  { color: var(--white); background: var(--red); border-color: var(--red); }
 
 /* ---- Layout ---- */
 .view { flex: 1; min-height: 0; display: grid; }
