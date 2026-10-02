@@ -135,9 +135,38 @@ Opening the app while signed out goes to `login.php`, where people sign in or cr
   an `X-CSRF-Token` header.
 - **The session cookie has its own name** (`apiwb_session`). Other PHP apps on the same host use PHP's
   default, and sharing it would let their sign-in leak into this one.
-- **Admins** are the first account created, anyone with `users.is_admin = 1`, and `APIWB_OWNER`. To make
-  someone else an admin:
-  `UPDATE apiworkbench.users SET is_admin = 1 WHERE username = 'them@company.com';`
+- **Admins** are the first account created, anyone made admin on the **Admin** tab, and `APIWB_OWNER`.
+
+## Admin tab
+
+Visible to admins only (and enforced by the server, not just hidden).
+
+**Users**: every account with its role, status, creation date and last sign-in.
+
+| Action | What it does |
+|---|---|
+| Make admin / Remove admin | grants or removes the right to manage accounts and see the log |
+| Disable / Enable | a disabled account cannot sign in, and is signed out on its **next request** if it already is |
+| Reset password | issues a one-time link to hand over directly (there is no email) |
+
+Guard rails, enforced in `src/Admin.php`:
+
+- Nobody can disable themselves or remove their own admin rights.
+- The owner (`APIWB_OWNER`) can only be changed by the owner.
+- The last active admin cannot be demoted or disabled.
+
+**Password reset links** work **once**, for `APIWB_RESET_TTL` seconds (an hour). Issuing a new one cancels
+any earlier link for that person. Only a SHA-256 of the link is stored, so a leaked database yields no
+working links. The link is built from the address the admin is using, not from a `Host` header. Using
+it clears any sign-in lockout on the account.
+
+**Activity log**: newest first, 100 at a time, filtered by user, action, date range and text. Click a
+username to see only that person. Failures are red, admin changes dark, and sign-ins green.
+
+Every admin change is itself logged (`admin.user.update`, `admin.user.reset_link`).
+
+**Locked out of every admin account?** Set `APIWB_OWNER` to your username in Apache's config and restart
+it. The owner is always an admin.
 
 Saved collections and environments:
 
@@ -159,7 +188,9 @@ The `activity_log` table records:
 | `action` | `detail` |
 |---|---|
 | `register`, `login`, `logout` | |
-| `login.failed`, `login.blocked` | the client IP |
+| `login.failed`, `login.blocked`, `login.disabled` | the client IP |
+| `admin.user.update`, `admin.user.reset_link` | who was changed, and how |
+| `user.password_reset` | a reset link was used |
 | `apiwb.request` | `GET https://api.corp/users -> 200`. The query string is left out because it often carries keys |
 | `apiwb.collection.save` / `.delete`, `apiwb.environment.save` / `.delete` | which item |
 
@@ -172,7 +203,7 @@ SELECT created_at, username, action, detail FROM apiworkbench.activity_log ORDER
 Write `{{name}}` anywhere in the URL, query params, headers, Auth fields or body. Pick an environment from
 the **Environment** picker above the URL bar, and the values are filled in when the request is sent.
 
-- **Manage** creates and edits environments. Each is stored in this browser, or in the database (private
+- The **Environments** button on the right-hand rail creates and edits environments. Each is stored in this browser, or in the database (private
   or shared).
 - Under the URL bar, a preview line shows what the URL resolves to, or which variables have no value.
 - A request with an unfilled variable is not sent. The error names the variable.
@@ -248,9 +279,11 @@ php check.php                    # local
 | `SERVER_ERROR` / `Fatal: ...` | PHP reached the endpoint and crashed. The message names the file and line | `php check.php` |
 | `CONFIG_ERROR` | PHP too old, curl missing, a setting invalid, or `config.php` missing or unreadable | `php check.php` |
 | `NOT_SIGNED_IN` | the session ended | sign in again |
+| `ACCOUNT_DISABLED` | an admin disabled this account | ask an admin |
+| `FORBIDDEN` | not allowed: not an admin, or a guard rail (e.g. demoting the last admin) | the message says which |
 | `CSRF` | the page's session token is stale | reload the page |
 | `CONFLICT` | someone saved the same shared collection or environment after you loaded it | reload, then redo your change |
-| `MISSING_VARIABLES` | a `{{variable}}` has no value in the chosen environment | the Environment picker, or **Manage** |
+| `MISSING_VARIABLES` | a `{{variable}}` has no value in the chosen environment | the Environment picker, or the **Environments** button on the right rail |
 | `URL_NOT_ALLOWED` | hosted mode refused the host | `APIWB_ALLOWED_HOSTS` |
 | `CONNECTION_FAILED` / `TIMEOUT` / `TLS_ERROR` | the proxy ran, the target API did not answer | the target, from the server: `curl -v <url>` |
 | `NETWORK_ERROR` ... *without JSON* | the request never reached the PHP code. The web server refused it, or PHP is not wired up | the web server error log (`/var/log/httpd/error_log`, or the `php -S` terminal) |
@@ -272,6 +305,7 @@ cannot read it. Create it from `config.example.php` (step 4 above).
 index.html            the app (redirects to login.php when signed out)
 login.php             sign-in and create-account page
 auth.php              handles sign-in, account creation and sign-out
+reset.php             sets a new password from an admin-issued one-time link
 proxy.php             sends requests
 api.php               who is signed in; saved collections and environments
 bootstrap.php         shared start of the JSON endpoints: error nets, PHP version check (not served)
@@ -279,7 +313,8 @@ settings.php          every setting, with APIWB_* environment overrides (not ser
 config.example.php    template for config.php (database details), which stays in the app folder, gitignored
 schema.sql            creates the apiworkbench database and its tables (not served)
 check.php             command-line health check (not served)
-src/                  server classes: Session, Auth, ItemStore, proxy classes (not web-accessible)
+src/                  server classes: Session, Auth, Admin, ItemStore, proxy classes (not web-accessible)
+js/admin.js           Admin tab: users, reset links, activity log
 css/app.css           styles
 js/app.js             entry point: sign-in state, tab switching
 js/tester.js          Tester tab
@@ -300,8 +335,8 @@ vendor/monaco/        Monaco editor 0.52.2, trimmed (MIT)
 
 ## Limits of this version
 
-- No password reset by email; an admin resets one in the database (`password_hash` a new one).
-- No admin screen yet: user admin rights and the activity log are managed with SQL.
+- No email: password reset links are handed over by an admin. People cannot change their own password
+  while signed in.
 - No multipart file uploads, cookie jar, or WebSockets.
 - Only one browser-only collection ("This browser"). Create more as database collections.
 - The Designer still saves to the browser only, not to the database.

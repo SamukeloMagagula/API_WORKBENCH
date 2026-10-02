@@ -75,10 +75,15 @@ if (PHP_VERSION_ID >= 80000) {
                 if (!function_exists('connect')) throw new RuntimeException('no connect() to call');
                 $db = connect();
                 $report(true, 'database connects', (string) $db->query('SELECT DATABASE()')->fetchColumn());
-                foreach (['users', 'login_attempts', 'activity_log', 'items'] as $table) {
+                foreach (['users', 'login_attempts', 'activity_log', 'items', 'password_resets'] as $table) {
                     $found = $db->query("SHOW TABLES LIKE '$table'")->fetchColumn() !== false;
                     $report($found, "table $table present", $found ? '' : 'run: sudo mariadb < schema.sql');
                 }
+                // Added after the first release; every request reads it, so its absence breaks everything.
+                $hasDisabled = $db->query("SHOW COLUMNS FROM users LIKE 'disabled'")->fetchColumn() !== false;
+                $report($hasDisabled, 'column users.disabled present', $hasDisabled ? '' : 'run: sudo mariadb < schema.sql (safe to re-run)');
+                $admins = (int) $db->query('SELECT COUNT(*) FROM users WHERE is_admin = 1' . ($hasDisabled ? ' AND disabled = 0' : ''))->fetchColumn();
+                echo "  \033[2minfo\033[0m  $admins active admin(s)" . (OWNER_USER !== '' ? ', plus owner ' . OWNER_USER : '') . "\n";
                 $users = (int) $db->query('SELECT COUNT(*) FROM users')->fetchColumn();
                 echo "  \033[2minfo\033[0m  $users account(s)" . ($users === 0 ? ': the first one created becomes an admin' : '') . "\n";
             } catch (Throwable $e) {

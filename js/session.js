@@ -40,12 +40,17 @@ export const serverStorage = () => session.auth === 'login' && session.signedIn 
 /** Headers every state-changing call to this app's PHP must carry. */
 export const csrfHeaders = () => (session.csrfToken ? { 'X-CSRF-Token': session.csrfToken } : {});
 
-/** Calls api.php. Pass a body to POST it; throws an Error with .code on failure. */
-export async function api(action, body) {
+/**
+ * Calls api.php. Pass a body to POST it, or query parameters for a GET.
+ * Throws an Error with .code on failure.
+ */
+export async function api(action, body, query = {}) {
   const options = body === undefined
     ? { headers: { Accept: 'application/json' } }
     : { method: 'POST', headers: { 'Content-Type': 'application/json', ...csrfHeaders() }, body: JSON.stringify(body) };
-  const res = await fetch(`api.php?action=${encodeURIComponent(action)}`, options);
+  const params = new URLSearchParams({ action });
+  for (const [key, value] of Object.entries(query)) if (value !== '' && value != null) params.set(key, value);
+  const res = await fetch(`api.php?${params}`, options);
   let data;
   try {
     data = await res.json();

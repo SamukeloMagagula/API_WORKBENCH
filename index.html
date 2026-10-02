@@ -22,6 +22,10 @@
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
         <span>Designer</span>
       </button>
+      <button class="tab hidden" data-view="admin" role="tab" id="tab-admin">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span>Admin</span>
+      </button>
     </nav>
     <div class="header-user" id="header-user"></div>
   </header>
@@ -65,7 +69,6 @@
             <span>Environment</span>
             <select id="env-select"></select>
           </label>
-          <button type="button" class="btn small" id="btn-manage-envs">Manage</button>
           <button type="button" class="btn small" id="btn-save" title="Save (Ctrl+S)">
             <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
             Save
@@ -213,6 +216,43 @@
       </div>
       <ul class="problems" id="problems"></ul>
       <pre id="spec-preview" class="code-view"></pre>
+    </section>
+  </main>
+
+  <!-- ===================== ADMIN (admins only) ===================== -->
+  <main id="view-admin" class="view admin hidden">
+    <section class="workspace admin-workspace">
+      <div class="admin-head">
+        <h2>Admin</h2>
+        <div class="seg" id="admin-tabs">
+          <button class="seg-btn active" data-admin="users">Users</button>
+          <button class="seg-btn" data-admin="activity">Activity log</button>
+        </div>
+      </div>
+
+      <div id="admin-users">
+        <div class="admin-bar">
+          <input type="search" id="user-filter" placeholder="Filter by email" aria-label="Filter users">
+          <span class="hint" id="user-count"></span>
+          <span class="spacer"></span>
+          <button type="button" class="btn small" id="btn-reload-users">Refresh</button>
+        </div>
+        <div class="table-wrap"><table class="data-table" id="users-table"></table></div>
+      </div>
+
+      <div id="admin-activity" class="hidden">
+        <form class="admin-bar" id="log-filters" autocomplete="off">
+          <label>User<input type="search" name="user" placeholder="email"></label>
+          <label>Action<select name="action"><option value="">All actions</option></select></label>
+          <label>From<input type="date" name="from"></label>
+          <label>To<input type="date" name="to"></label>
+          <label class="grow">Contains<input type="search" name="q" placeholder="text in user, action or detail"></label>
+          <button type="submit" class="btn small primary">Apply</button>
+          <button type="button" class="btn small" id="btn-clear-log-filters">Clear</button>
+        </form>
+        <div class="table-wrap"><table class="data-table" id="log-table"></table></div>
+        <div class="admin-more"><button type="button" class="btn small hidden" id="btn-log-more">Load more</button></div>
+      </div>
     </section>
   </main>
 

@@ -52,7 +52,12 @@ final class Auth
         return $this->user;
     }
 
-    /** The signed-in user; refuses the request otherwise. With auth off, an anonymous user. */
+    /**
+     * The signed-in user; refuses the request otherwise. With auth off, an anonymous user.
+     *
+     * Checked against the database every time, so disabling or deleting an account takes
+     * effect on that person's very next request, not when their session happens to end.
+     */
     public function requireUser(): array
     {
         if (!$this->enabled()) return ['id' => 0, 'username' => ''];
@@ -60,7 +65,51 @@ final class Auth
         if ($user === null) {
             throw new ProxyException('NOT_SIGNED_IN', 'Your session has ended. Sign in again.', 401);
         }
+        $account = $this->account($user['id']);
+        if ($account === null) {
+            throw new ProxyException('NOT_SIGNED_IN', 'This account no longer exists.', 401);
+        }
+        if ($account['disabled']) {
+            throw new ProxyException('ACCOUNT_DISABLED', 'This account has been disabled. Ask an administrator.', 403);
+        }
         return $user;
+    }
+
+    /** The signed-in user, who must be an admin. */
+    public function requireAdmin(): array
+    {
+        $user = $this->requireUser();
+        if (!$this->isAdmin($user['id'])) {
+            throw new ProxyException('FORBIDDEN', 'Only an administrator can do this.', 403);
+        }
+        return $user;
+    }
+
+    /** @return array{username: string, isAdmin: bool, disabled: bool}|null */
+    public function account(int $userId): ?array
+    {
+        static $cache = [];
+        if (!array_key_exists($userId, $cache)) {
+            $stmt = $this->db()->prepare('SELECT username, is_admin, disabled FROM users WHERE id = ?');
+            $stmt->execute([$userId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $cache[$userId] = $row ? [
+                'username' => (string) $row['username'],
+                'isAdmin' => (bool) $row['is_admin'] || ($this->config['owner'] !== '' && $row['username'] === $this->config['owner']),
+                'disabled' => (bool) $row['disabled'],
+            ] : null;
+        }
+        return $cache[$userId];
+    }
+
+    /** Signs the session out, leaving a message for the sign-in page to show. */
+    public function endSession(string $message): void
+    {
+        apiwb_session_start(); // reopened: start() released it
+        unset($_SESSION['user_id'], $_SESSION['username']);
+        $_SESSION['flash_error'] = $message;
+        session_write_close();
+        $this->user = null;
     }
 
     public function csrfToken(): string
@@ -91,10 +140,8 @@ final class Auth
     public function isAdmin(int $userId): bool
     {
         if (!$this->enabled() || $userId <= 0) return false;
-        $stmt = $this->db()->prepare('SELECT username, is_admin FROM users WHERE id = ?');
-        $stmt->execute([$userId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row && ((bool) $row['is_admin'] || ($this->config['owner'] !== '' && $row['username'] === $this->config['owner']));
+        $account = $this->account($userId);
+        return $account !== null && $account['isAdmin'] && !$account['disabled'];
     }
 
     /**

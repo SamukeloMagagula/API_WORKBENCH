@@ -144,7 +144,7 @@ if ($action === 'login') {
         bounce('Too many failed sign-in attempts. Wait a few minutes and try again.');
     }
 
-    $query = $db->prepare('SELECT id, password FROM users WHERE username = ?');
+    $query = $db->prepare('SELECT id, password, disabled FROM users WHERE username = ?');
     $query->execute([$username]);
     $user = $query->fetch(PDO::FETCH_ASSOC);
 
@@ -152,6 +152,12 @@ if ($action === 'login') {
         $db->prepare('INSERT INTO login_attempts (username, ip) VALUES (?, ?)')->execute([$username, $ip]);
         apiwb_log($db, $username, 'login.failed', $ip);
         bounce('Invalid email or password.');
+    }
+
+    // Said only after the right password, so it reveals nothing to someone guessing.
+    if ((int) $user['disabled'] === 1) {
+        apiwb_log($db, $username, 'login.disabled', $ip);
+        bounce('This account has been disabled. Ask an administrator.');
     }
 
     // A clean sign-in clears the account's failures, so one fumbled password does not

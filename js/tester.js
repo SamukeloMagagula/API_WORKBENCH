@@ -1045,7 +1045,6 @@ export function initTester() {
   $('#btn-save').addEventListener('click', saveCurrent);
   $('#btn-import').addEventListener('click', importDialog);
   $('#btn-code').addEventListener('click', codeDialog);
-  $('#btn-rail-envs').addEventListener('click', () => $('#btn-manage-envs').click());
   $('#request-name').addEventListener('click', renameCurrent);
   $('#request-name').title = 'Click to rename';
 

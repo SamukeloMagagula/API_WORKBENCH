@@ -67,6 +67,9 @@ define('REGISTRATION_KEY', getenv('APIWB_REGISTRATION_KEY') ?: '');
 /** When set, e.g. "@za.logicalis.com", accounts must use an email address ending in it. */
 define('EMAIL_DOMAIN', strtolower(trim((string) getenv('APIWB_EMAIL_DOMAIN'))));
 
+/** How long an admin-issued password reset link stays usable, in seconds. Single use either way. */
+define('RESET_TTL_SECONDS', (int) (getenv('APIWB_RESET_TTL') ?: 3600));
+
 /** Failed sign-ins allowed per username and per IP within LOGIN_WINDOW_SECONDS. */
 define('LOGIN_MAX_ATTEMPTS', (int) (getenv('APIWB_LOGIN_MAX_ATTEMPTS') ?: 10));
 define('LOGIN_WINDOW_SECONDS', (int) (getenv('APIWB_LOGIN_WINDOW') ?: 900));

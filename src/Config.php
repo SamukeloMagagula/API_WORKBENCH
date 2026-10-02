@@ -18,6 +18,7 @@ final class Config
             'auth' => AUTH_MODE,
             'config_path' => CONFIG_PATH,
             'owner' => OWNER_USER,
+            'reset_ttl' => RESET_TTL_SECONDS,
             'allowed_hosts' => ALLOWED_HOSTS,
             'restrict_to_allowed_hosts' => RESTRICT_TO_ALLOWED_HOSTS,
             'blocked_hosts' => BLOCKED_HOSTS,

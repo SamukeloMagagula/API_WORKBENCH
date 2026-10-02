@@ -185,5 +185,6 @@ async function remove(env, modal) {
 export function initEnvironments() {
   renderSelect();
   $('#env-select').addEventListener('change', (e) => setActive(e.target.value));
-  $('#btn-manage-envs').addEventListener('click', () => openEditor(activeKey));
+  // The Environments button on the right-hand rail opens the editor on the active one.
+  $('#btn-rail-envs').addEventListener('click', () => openEditor(activeKey));
 }

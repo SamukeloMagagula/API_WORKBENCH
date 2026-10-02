@@ -1,5 +1,5 @@
 // Entry point: loads who is signed in and their server-side data, then starts the
-// Tester and Designer and switches between them.
+// Tester, Designer and (for admins) Admin views and switches between them.
 
 import { $, $$, h } from './dom.js';
 import { load, save } from './storage.js';
@@ -8,10 +8,15 @@ import { refreshServerCollections } from './collections.js';
 import { initEnvironments, refreshServerEnvironments } from './environments.js';
 import { initTester, loadRequest } from './tester.js';
 import { initDesigner } from './designer.js';
+import { initAdmin, showAdmin } from './admin.js';
+
+const views = () => ['tester', 'designer', ...(session.isAdmin ? ['admin'] : [])];
 
 function showView(view) {
+  if (!views().includes(view)) view = 'tester';
   $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === view));
   $$('.view').forEach((v) => v.classList.toggle('hidden', v.id !== `view-${view}`));
+  if (view === 'admin') showAdmin();
   save('view', view);
 }
 
@@ -49,12 +54,17 @@ async function start() {
       $('#req-url').focus();
     },
   });
+  // Hiding the tab is for tidiness; api.php refuses non-admins whatever the page shows.
+  if (session.isAdmin) {
+    $('#tab-admin').classList.remove('hidden');
+    initAdmin();
+  }
 
   $('.tabs').addEventListener('click', (e) => {
     const tab = e.target.closest('.tab');
     if (tab) showView(tab.dataset.view);
   });
-  showView(load('view', 'tester') === 'designer' ? 'designer' : 'tester');
+  showView(load('view', 'tester'));
 }
 
 start();
