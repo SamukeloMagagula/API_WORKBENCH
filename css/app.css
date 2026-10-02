@@ -119,6 +119,8 @@ code { font-family: var(--mono); font-size: .9em; background: var(--grey-200); b
 }
 .btn.icon:hover { background: var(--grey-100); color: var(--red); }
 .btn:disabled { opacity: .5; cursor: default; }
+.btn.icon-only { width: 30px; height: 28px; padding: 0; }
+.btn.icon-only .ico { width: 15px; height: 15px; }
 .btn:focus-visible { outline: none; box-shadow: var(--focus); border-color: var(--black); }
 
 /* ---- Forms ---- */

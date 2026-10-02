@@ -725,7 +725,11 @@ function applyZoom(zoom) {
 function setExpanded(expanded) {
   $('#response-panel').classList.toggle('expanded', expanded);
   document.body.classList.toggle('res-expanded', expanded);
-  $('#btn-expand-response').textContent = expanded ? 'Close' : 'Expand';
+  const btn = $('#btn-expand-response');
+  btn.querySelector('.ico-expand').classList.toggle('hidden', expanded);
+  btn.querySelector('.ico-collapse').classList.toggle('hidden', !expanded);
+  btn.title = expanded ? 'Exit full screen (Esc)' : 'Expand (Esc closes)';
+  btn.setAttribute('aria-label', expanded ? 'Exit full screen' : 'Expand response');
 }
 
 function wireResponseZoom() {
