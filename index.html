@@ -10,10 +10,24 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">API Workbench</div>
+    <div class="brand-mark">
+      <!-- Optional: drop a logo.png next to index.html; hidden when absent. -->
+      <img id="brand-logo" src="logo.png" alt="" onerror="this.style.display='none'">
+      <span class="wordmark">
+        <span class="wm-name">LOGICALIS</span>
+        <span class="wm-rule" aria-hidden="true"></span>
+        <span class="wm-sub">API WORKBENCH</span>
+      </span>
+    </div>
     <nav class="tabs" role="tablist">
-      <button class="tab active" data-view="tester" role="tab">Tester</button>
-      <button class="tab" data-view="designer" role="tab">Designer</button>
+      <button class="tab active" data-view="tester" role="tab">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        <span>Tester</span>
+      </button>
+      <button class="tab" data-view="designer" role="tab">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+        <span>Designer</span>
+      </button>
     </nav>
     <span id="mode-badge" class="badge" title="Server mode">…</span>
   </header>
@@ -112,6 +126,7 @@
   <!-- ===================== DESIGNER ===================== -->
   <main id="view-designer" class="view designer hidden">
     <aside class="sidebar">
+      <div class="side-heading"><span>API</span></div>
       <div class="side-actions">
         <select id="api-select" class="grow"></select>
       </div>
