@@ -1,18 +1,25 @@
 // The Tester tab: build a request, send it through proxy.php, show the response.
-// Saved requests, history and the current draft are kept in localStorage.
+// History and the current draft are kept in localStorage; saved requests live in
+// collections (collections.js); {{variables}} come from the active environment.
 
-import { $, $$, h, toast, downloadFile, pickFile, copyText, wireSubtabs, showPane, highlightJson, formatBytes } from './dom.js';
+import { $, $$, h, toast, downloadFile, pickFile, copyText, wireSubtabs, showPane, highlightJson, formatBytes, openModal } from './dom.js';
 import { load, save, uid } from './storage.js';
 import { renderKvTable } from './kvtable.js';
+import { session, serverStorage, csrfHeaders } from './session.js';
+import { activeEnvironment, activeVariables, onEnvironmentChange } from './environments.js';
+import { resolveRequest, hasVariables } from './variables.js';
+import { listCollections, currentCollection, setCurrentCollection, updateRequests, createCollection, deleteCollection } from './collections.js';
+import { looksLikeCurl, parseCurl } from './curl.js';
+import { GENERATORS } from './codegen.js';
 
 const HISTORY_LIMIT = 50;
 const EXPORT_FORMAT = 'api-workbench-requests';
+const SCOPE_LABEL = { local: '', private: ' (only me)', shared: ' (shared)' };
 
 let req = blankRequest();
 let params = [];
-let currentSavedId = null;
+let currentSaved = null; // { collectionKey, id } of the saved request being edited, if any
 let currentName = 'Untitled request';
-let saved = load('saved', []);
 let history = load('history', []);
 let sideTab = 'saved';
 let inFlight = null;
@@ -49,7 +56,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 let draftTimer;
 function persistDraft() {
   clearTimeout(draftTimer);
-  draftTimer = setTimeout(() => save('draft', { req, currentSavedId, currentName }), 250);
+  draftTimer = setTimeout(() => save('draft', { req, currentSaved, currentName }), 250);
 }
 
 // ---------------------------------------------------------------- URL <-> params
@@ -77,11 +84,14 @@ function parseParams(url) {
   });
 }
 
+// {{variables}} are kept readable rather than percent-encoded, so they still resolve.
+const encodeKeepingVariables = (s) => s.split(/(\{\{[^{}]*\}\})/).map((part, i) => (i % 2 ? part : encodeURIComponent(part))).join('');
+
 function buildUrl(url, rows) {
   const { base, hash } = splitUrl(url);
   const query = rows
     .filter((r) => r.name)
-    .map((r) => encodeURIComponent(r.name) + (r.value !== '' ? '=' + encodeURIComponent(r.value) : ''))
+    .map((r) => encodeKeepingVariables(r.name) + (r.value !== '' ? '=' + encodeKeepingVariables(r.value) : ''))
     .join('&');
   return base + (query ? '?' + query : '') + hash;
 }
@@ -95,6 +105,7 @@ function renderParams() {
     onChange: () => {
       req.url = buildUrl(req.url, params);
       $('#req-url').value = req.url;
+      updateUrlPreview();
       persistDraft();
     },
   });
@@ -140,6 +151,10 @@ function updateBodyStatus() {
   el.className = 'hint';
   el.textContent = '';
   if (req.body.type !== 'json' || !req.body.text.trim()) return;
+  if (hasVariables(req.body.text)) {
+    el.textContent = 'Contains {{variables}}: checked after they are filled in';
+    return;
+  }
   try {
     JSON.parse(req.body.text);
     el.textContent = 'Valid JSON';
@@ -148,6 +163,21 @@ function updateBodyStatus() {
     el.textContent = e.message;
     el.classList.add('error');
   }
+}
+
+/** Under the URL bar: what {{variables}} in the URL turn into with the active environment. */
+function updateUrlPreview() {
+  const el = $('#url-preview');
+  if (!hasVariables(req.url)) {
+    el.classList.add('hidden');
+    return;
+  }
+  const { request, missing } = resolveRequest(req, activeVariables());
+  el.classList.remove('hidden');
+  el.className = `url-preview${missing.length ? ' error' : ''}`;
+  el.textContent = missing.length
+    ? `No value for ${missing.map((n) => `{{${n}}}`).join(', ')}${activeEnvironment() ? ` in “${activeEnvironment().name}”` : ': choose an environment'}`
+    : `→ ${request.url}`;
 }
 
 function renderRequest() {
@@ -159,32 +189,60 @@ function renderRequest() {
   renderHeaders();
   renderAuth();
   renderBody();
+  updateUrlPreview();
 }
 
-/** Replaces the editor contents with a request (from saved, history or the designer's "Try it"). */
-export function loadRequest(request, { savedId = null, name = 'Untitled request' } = {}) {
+/** Replaces the editor contents with a request (from saved, history, curl or the designer's "Try it"). */
+export function loadRequest(request, { saved = null, name = 'Untitled request' } = {}) {
   req = normalize(clone(request));
-  currentSavedId = savedId;
+  currentSaved = saved;
   currentName = name;
   renderRequest();
   renderSide();
   persistDraft();
 }
 
-// ---------------------------------------------------------------- sidebar: saved + history
+// ---------------------------------------------------------------- sidebar: collections + history
+
+function renderCollectionBar() {
+  const bar = $('#collection-bar');
+  const collections = listCollections();
+  const current = currentCollection();
+  const select = h('select', {
+    class: 'grow', title: 'Collection',
+    onchange: (e) => { setCurrentCollection(e.target.value); renderSide(); },
+  }, ...collections.map((c) => h('option', { value: c.key, text: c.name + SCOPE_LABEL[c.scope], selected: c.key === current.key })));
+
+  const children = [h('div', { class: 'side-actions' }, select)];
+  if (serverStorage()) {
+    const buttons = [h('button', { class: 'btn small', text: '+ Collection', onclick: newCollectionDialog })];
+    if (current.scope !== 'local') buttons.push(h('button', { class: 'btn small', text: 'Settings', onclick: () => collectionDialog(current) }));
+    children.push(h('div', { class: 'side-actions' }, ...buttons));
+    if (current.scope === 'shared') {
+      children.push(h('p', { class: 'hint', text: `Shared by ${current.owner}${current.updatedBy ? ` · last saved by ${current.updatedBy}` : ''}` }));
+    }
+  } else if (session.auth === 'devhub' && session.signedIn && session.storageError) {
+    children.push(h('p', { class: 'hint error', text: `Server collections unavailable: ${session.storageError}` }));
+  }
+  bar.replaceChildren(...children);
+}
 
 function renderSide() {
+  $('#collection-bar').classList.toggle('hidden', sideTab !== 'saved');
   $('#saved-actions').classList.toggle('hidden', sideTab !== 'saved');
   $('#history-actions').classList.toggle('hidden', sideTab !== 'history');
   $$('#side-tabs .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.side === sideTab));
 
   const list = $('#side-list');
   if (sideTab === 'saved') {
+    renderCollectionBar();
+    const collection = currentCollection();
+    const requests = collection.requests;
     list.replaceChildren(
-      ...(saved.length ? saved.map((item) => h('li', {
-        class: item.id === currentSavedId ? 'active' : '',
+      ...(requests.length ? requests.map((item) => h('li', {
+        class: currentSaved?.collectionKey === collection.key && currentSaved.id === item.id ? 'active' : '',
         title: item.request.url,
-        onclick: () => loadRequest(item.request, { savedId: item.id, name: item.name }),
+        onclick: () => loadRequest(item.request, { saved: { collectionKey: collection.key, id: item.id }, name: item.name }),
       },
       h('span', { class: `method ${item.request.method}`, text: item.request.method }),
       h('span', { class: 'label', text: item.name }),
@@ -192,17 +250,17 @@ function renderSide() {
         class: 'btn icon remove', title: 'Delete', text: '×',
         onclick: (e) => { e.stopPropagation(); deleteSaved(item.id); },
       }),
-      )) : [h('li', { class: 'empty', text: 'No saved requests yet. Use Save to keep one here.' })]),
+      )) : [h('li', { class: 'empty', text: 'No saved requests in this collection yet. Use Save to add one.' })]),
     );
   } else {
     list.replaceChildren(
       ...(history.length ? history.map((item) => h('li', {
-        title: item.request.url,
+        title: item.displayUrl || item.request.url,
         onclick: () => loadRequest(item.request),
       },
       h('span', { class: `method ${item.request.method}`, text: item.request.method }),
       h('span', { class: 'label' },
-        item.request.url.replace(/^https?:\/\//, ''),
+        (item.displayUrl || item.request.url).replace(/^https?:\/\//, ''),
         h('div', { class: 'sub', text: `${item.status} · ${timeAgo(item.at)}` })),
       h('button', {
         class: 'btn icon remove', title: 'Remove from history', text: '×',
@@ -221,59 +279,71 @@ function timeAgo(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
-function saveCurrent() {
-  if (currentSavedId) {
-    const item = saved.find((x) => x.id === currentSavedId);
-    if (item) {
-      item.request = clone(req);
-      item.name = currentName;
-      save('saved', saved);
-      renderSide();
-      toast(`Saved “${item.name}”`);
-      return;
-    }
+/** The saved request being edited, if it belongs to the collection on screen. */
+function editingInCurrent() {
+  const collection = currentCollection();
+  if (currentSaved?.collectionKey !== collection.key) return null;
+  return collection.requests.some((x) => x.id === currentSaved.id) ? collection : null;
+}
+
+async function saveCurrent() {
+  const collection = currentCollection();
+  if (editingInCurrent()) {
+    const ok = await updateRequests(collection, (list) => {
+      const item = list.find((x) => x.id === currentSaved.id);
+      if (item) Object.assign(item, { name: currentName, request: clone(req) });
+    });
+    renderSide();
+    if (ok) toast(`Saved “${currentName}” in ${collection.name}`);
+    return;
   }
   const suggested = currentName !== 'Untitled request' ? currentName : suggestName();
-  const name = prompt('Name this request:', suggested);
+  const name = prompt(`Save to “${collection.name}” as:`, suggested);
   if (name === null) return;
   const item = { id: uid(), name: name.trim() || suggested, request: clone(req) };
-  saved.unshift(item);
-  save('saved', saved);
-  currentSavedId = item.id;
-  currentName = item.name;
-  $('#request-name').textContent = currentName;
+  const ok = await updateRequests(collection, (list) => list.unshift(item));
+  if (ok) {
+    currentSaved = { collectionKey: collection.key, id: item.id };
+    currentName = item.name;
+    $('#request-name').textContent = currentName;
+    persistDraft();
+    toast(`Saved “${item.name}” in ${collection.name}`);
+  }
   sideTab = 'saved';
   renderSide();
-  persistDraft();
-  toast(`Saved “${item.name}”`);
 }
 
 function suggestName() {
   const { base } = splitUrl(req.url);
-  const path = base.replace(/^[a-z]+:\/\/[^/]+/i, '') || '/';
+  const path = base.replace(/^[a-z]+:\/\/[^/]+/i, '').replace(/^\{\{[^}]*\}\}/, '') || '/';
   return `${req.method} ${path}`;
 }
 
-function renameCurrent() {
+async function renameCurrent() {
   const name = prompt('Rename request:', currentName);
   if (name === null || !name.trim()) return;
   currentName = name.trim();
   $('#request-name').textContent = currentName;
-  const item = saved.find((x) => x.id === currentSavedId);
-  if (item) {
-    item.name = currentName;
-    save('saved', saved);
+  const collection = editingInCurrent();
+  if (collection) {
+    await updateRequests(collection, (list) => {
+      const item = list.find((x) => x.id === currentSaved.id);
+      if (item) item.name = currentName;
+    });
     renderSide();
   }
   persistDraft();
 }
 
-function deleteSaved(id) {
-  const item = saved.find((x) => x.id === id);
-  if (!item || !confirm(`Delete “${item.name}”?`)) return;
-  saved = saved.filter((x) => x.id !== id);
-  save('saved', saved);
-  if (currentSavedId === id) currentSavedId = null;
+async function deleteSaved(id) {
+  const collection = currentCollection();
+  const item = collection.requests.find((x) => x.id === id);
+  if (!item || !confirm(`Delete “${item.name}” from ${collection.name}?`)) return;
+  await updateRequests(collection, (list) => {
+    const i = list.findIndex((x) => x.id === id);
+    if (i >= 0) list.splice(i, 1);
+  });
+  if (currentSaved?.id === id) currentSaved = null;
   renderSide();
 }
 
@@ -285,9 +355,11 @@ function deleteHistory(id) {
 }
 
 function exportSaved() {
-  if (!saved.length) return toast('Nothing to export yet.', 'error');
-  const payload = { format: EXPORT_FORMAT, version: 1, exportedAt: new Date().toISOString(), items: saved };
-  downloadFile('api-workbench-requests.json', JSON.stringify(payload, null, 2));
+  const collection = currentCollection();
+  if (!collection.requests.length) return toast('Nothing to export in this collection.', 'error');
+  const payload = { format: EXPORT_FORMAT, version: 1, name: collection.name, exportedAt: new Date().toISOString(), items: collection.requests };
+  const slug = collection.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'requests';
+  downloadFile(`api-workbench-${slug}.json`, JSON.stringify(payload, null, 2));
 }
 
 async function importSaved() {
@@ -301,50 +373,180 @@ async function importSaved() {
       .filter((x) => x && x.request)
       .map((x) => ({ id: uid(), name: String(x.name || 'Imported request'), request: normalize(x.request) }));
     if (!imported.length) throw new Error('No requests found in this file.');
-    saved = [...imported, ...saved];
-    save('saved', saved);
+    const collection = currentCollection();
+    if (await updateRequests(collection, (list) => list.unshift(...imported))) {
+      toast(`Imported ${imported.length} request${imported.length === 1 ? '' : 's'} into ${collection.name}`);
+    }
     sideTab = 'saved';
     renderSide();
-    toast(`Imported ${imported.length} request${imported.length === 1 ? '' : 's'}`);
   } catch (e) {
     toast(`Import failed: ${e.message}`, 'error');
   }
 }
 
+function collectionForm({ name = '', shared = false, canShare = true }) {
+  const nameInput = h('input', { type: 'text', value: name, placeholder: 'e.g. Billing API' });
+  const sharedInput = h('input', { type: 'checkbox', checked: shared, disabled: !canShare });
+  const body = h('div', {},
+    h('div', { class: 'form-group' }, h('label', {}, 'Name', nameInput)),
+    h('label', { class: 'check' }, sharedInput, 'Shared with everyone signed in'),
+    h('p', { class: 'hint', text: 'Everyone who can see a shared collection can edit it. Only its owner or an admin can delete it or stop sharing it.' }),
+  );
+  return { body, read: () => ({ name: nameInput.value.trim(), shared: sharedInput.checked }) };
+}
+
+function newCollectionDialog() {
+  const form = collectionForm({});
+  const modal = openModal({
+    title: 'New collection',
+    body: form.body,
+    actions: [
+      h('button', { class: 'btn', text: 'Cancel', onclick: () => modal.close() }),
+      h('button', {
+        class: 'btn primary', text: 'Create',
+        onclick: async () => {
+          const { name, shared } = form.read();
+          if (!name) return toast('Give the collection a name.', 'error');
+          if (await createCollection(name, shared)) {
+            modal.close();
+            sideTab = 'saved';
+            renderSide();
+          }
+        },
+      }),
+    ],
+  });
+}
+
+function collectionDialog(collection) {
+  const form = collectionForm({ name: collection.name, shared: collection.scope === 'shared', canShare: collection.canShare });
+  const actions = [];
+  if (collection.deletable) {
+    actions.push(h('button', {
+      class: 'btn danger', text: 'Delete collection',
+      onclick: async () => {
+        const warning = collection.scope === 'shared' ? ' It is shared, so it disappears for everyone.' : '';
+        if (!confirm(`Delete “${collection.name}” and its ${collection.requests.length} request(s)?${warning}`)) return;
+        if (await deleteCollection(collection)) {
+          modal.close();
+          renderSide();
+        }
+      },
+    }), h('span', { class: 'spacer' }));
+  }
+  actions.push(
+    h('button', { class: 'btn', text: 'Cancel', onclick: () => modal.close() }),
+    h('button', {
+      class: 'btn primary', text: 'Save',
+      onclick: async () => {
+        const { name, shared } = form.read();
+        if (!name) return toast('Give the collection a name.', 'error');
+        if (await updateRequests(collection, () => {}, { name, shared })) {
+          modal.close();
+          renderSide();
+        }
+      },
+    }),
+  );
+  const modal = openModal({ title: 'Collection settings', body: form.body, actions });
+}
+
+// ---------------------------------------------------------------- curl in, code out
+
+function importCurl(text) {
+  try {
+    const { request, warnings } = parseCurl(text);
+    loadRequest(request, { name: 'Imported from curl' });
+    toast(warnings.length ? `Imported, with notes: ${warnings.join(' ')}` : 'Imported from curl', warnings.length ? 'error' : 'info');
+    return true;
+  } catch (e) {
+    toast(`Could not read that curl command: ${e.message}`, 'error');
+    return false;
+  }
+}
+
+function curlDialog() {
+  const input = h('textarea', { class: 'code', rows: 10, spellcheck: false, placeholder: "curl -X POST 'https://api.example.com/users' -H 'Content-Type: application/json' -d '{\"name\":\"Ada\"}'" });
+  const modal = openModal({
+    title: 'Import from curl',
+    size: 'modal-lg',
+    body: h('div', {},
+      input,
+      h('p', { class: 'hint', text: 'Paste a curl command, for example from your browser\'s DevTools (Network → right-click → Copy as cURL) or from API docs. Pasting one straight into the URL box works too.' })),
+    actions: [
+      h('button', { class: 'btn', text: 'Cancel', onclick: () => modal.close() }),
+      h('button', { class: 'btn primary', text: 'Import', onclick: () => { if (importCurl(input.value)) modal.close(); } }),
+    ],
+  });
+}
+
+function codeDialog() {
+  const { request, missing } = resolveRequest(req, activeVariables());
+  const outgoing = buildOutgoing(request);
+  if (!outgoing.url) return toast('Enter a URL first.', 'error');
+
+  let current = load('codeLanguage', 'curl');
+  if (!GENERATORS.some((g) => g.id === current)) current = 'curl';
+  const pre = h('pre', { class: 'code-view code-export' });
+  const tabs = h('div', { class: 'seg' });
+  const render = () => {
+    pre.textContent = GENERATORS.find((g) => g.id === current).fn(outgoing);
+    tabs.replaceChildren(...GENERATORS.map((g) => h('button', {
+      class: `seg-btn${g.id === current ? ' active' : ''}`, type: 'button', text: g.label,
+      onclick: () => { current = g.id; save('codeLanguage', current); render(); },
+    })));
+  };
+  render();
+
+  const notes = [];
+  if (missing.length) notes.push(h('p', { class: 'hint error', text: `No value for ${missing.map((n) => `{{${n}}}`).join(', ')}: left as written.` }));
+  if (activeEnvironment() && !missing.length) notes.push(h('p', { class: 'hint', text: `Variables filled in from “${activeEnvironment().name}”. The code contains their values, tokens included.` }));
+
+  const modal = openModal({
+    title: 'Code for this request',
+    size: 'modal-lg',
+    body: h('div', {}, h('div', { class: 'form-row' }, tabs), ...notes, pre),
+    actions: [
+      h('button', { class: 'btn', text: 'Close', onclick: () => modal.close() }),
+      h('button', { class: 'btn primary', text: 'Copy', onclick: () => copyText(pre.textContent) }),
+    ],
+  });
+}
+
 // ---------------------------------------------------------------- sending
 
-function buildOutgoing() {
-  let url = req.url.trim();
+function buildOutgoing(r) {
+  let url = r.url.trim();
   if (url && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) url = 'http://' + url;
 
-  const headers = req.headers
+  const headers = r.headers
     .filter((x) => x.enabled !== false && x.name.trim())
     .map((x) => ({ name: x.name.trim(), value: x.value }));
   const has = (name) => headers.some((x) => x.name.toLowerCase() === name);
 
   if (!has('authorization')) {
-    if (req.auth.type === 'bearer' && req.auth.token) {
-      headers.push({ name: 'Authorization', value: `Bearer ${req.auth.token}` });
-    } else if (req.auth.type === 'basic' && (req.auth.username || req.auth.password)) {
-      const bytes = new TextEncoder().encode(`${req.auth.username}:${req.auth.password}`);
+    if (r.auth.type === 'bearer' && r.auth.token) {
+      headers.push({ name: 'Authorization', value: `Bearer ${r.auth.token}` });
+    } else if (r.auth.type === 'basic' && (r.auth.username || r.auth.password)) {
+      const bytes = new TextEncoder().encode(`${r.auth.username}:${r.auth.password}`);
       headers.push({ name: 'Authorization', value: `Basic ${btoa(String.fromCharCode(...bytes))}` });
     }
   }
 
   let body = null;
   const contentTypes = { json: 'application/json', text: 'text/plain', form: 'application/x-www-form-urlencoded' };
-  if (req.body.type === 'json' || req.body.type === 'text') {
-    body = req.body.text;
-  } else if (req.body.type === 'form') {
+  if (r.body.type === 'json' || r.body.type === 'text') {
+    body = r.body.text;
+  } else if (r.body.type === 'form') {
     const form = new URLSearchParams();
-    req.body.form.filter((x) => x.enabled !== false && x.name).forEach((x) => form.append(x.name, x.value));
+    r.body.form.filter((x) => x.enabled !== false && x.name).forEach((x) => form.append(x.name, x.value));
     body = form.toString();
   }
-  if (body !== null && contentTypes[req.body.type] && !has('content-type')) {
-    headers.push({ name: 'Content-Type', value: contentTypes[req.body.type] });
+  if (body !== null && contentTypes[r.body.type] && !has('content-type')) {
+    headers.push({ name: 'Content-Type', value: contentTypes[r.body.type] });
   }
 
-  return { method: req.method, url, headers, body };
+  return { method: r.method, url, headers, body };
 }
 
 async function send() {
@@ -352,7 +554,14 @@ async function send() {
     inFlight.abort();
     return;
   }
-  const outgoing = buildOutgoing();
+  const env = activeEnvironment();
+  const { request, missing } = resolveRequest(req, activeVariables());
+  if (missing.length) {
+    showResponse({ ok: false, error: { code: 'MISSING_VARIABLES', message: `No value for ${missing.map((n) => `{{${n}}}`).join(', ')}`
+      + (env ? ` in the environment “${env.name}”.` : '. Choose an environment that defines it, top right.') } });
+    return;
+  }
+  const outgoing = buildOutgoing(request);
   if (!outgoing.url) {
     toast('Enter a URL first.', 'error');
     $('#req-url').focus();
@@ -368,7 +577,7 @@ async function send() {
   try {
     const res = await fetch('proxy.php', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
       body: JSON.stringify(outgoing),
       signal: controller.signal,
     });
@@ -398,8 +607,9 @@ async function send() {
   }
 }
 
-function addHistory(url, status) {
-  history.unshift({ id: uid(), at: Date.now(), status, request: { ...clone(req), url } });
+/** History keeps the request as written ({{variables}} intact) and the URL it resolved to. */
+function addHistory(displayUrl, status) {
+  history.unshift({ id: uid(), at: Date.now(), status, displayUrl, request: clone(req) });
   history = history.slice(0, HISTORY_LIMIT);
   save('history', history);
   if (sideTab === 'history') renderSide();
@@ -413,10 +623,13 @@ function showResponse(data) {
   const tabs = $('#response-tabs');
 
   if (!data.ok) {
-    meta.replaceChildren(
+    meta.replaceChildren(...[
       h('span', { class: 'status err', text: data.error?.code || 'ERROR' }),
       h('span', { text: data.error?.message || 'Unknown error' }),
-    );
+      data.error?.code === 'NOT_SIGNED_IN' && session.loginUrl
+        ? h('a', { class: 'btn small primary', href: session.loginUrl, target: '_blank', rel: 'noopener', text: 'Sign in to devhub' })
+        : null,
+    ].filter(Boolean));
     tabs.classList.add('hidden');
     setExpanded(false); // the toolbar holding "Close" is hidden for errors
     $('#res-body').textContent = '';
@@ -544,7 +757,7 @@ export function initTester() {
   const draft = load('draft', null);
   if (draft?.req) {
     req = normalize(draft.req);
-    currentSavedId = saved.some((x) => x.id === draft.currentSavedId) ? draft.currentSavedId : null;
+    currentSaved = draft.currentSaved ?? null;
     currentName = draft.currentName || 'Untitled request';
   }
   renderRequest();
@@ -556,9 +769,20 @@ export function initTester() {
     req.url = e.target.value;
     params = parseParams(req.url);
     renderParams();
+    updateUrlPreview();
     persistDraft();
   });
+  // Pasting a whole curl command into the URL box imports it instead.
+  $('#req-url').addEventListener('paste', (e) => {
+    const text = e.clipboardData?.getData('text') || '';
+    if (looksLikeCurl(text)) {
+      e.preventDefault();
+      importCurl(text);
+    }
+  });
   $('#btn-save').addEventListener('click', saveCurrent);
+  $('#btn-import-curl').addEventListener('click', curlDialog);
+  $('#btn-code').addEventListener('click', codeDialog);
   $('#request-name').addEventListener('click', renameCurrent);
   $('#request-name').title = 'Click to rename';
 
@@ -608,6 +832,8 @@ export function initTester() {
     save('history', history);
     renderSide();
   });
+
+  onEnvironmentChange(updateUrlPreview);
 
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !$('#view-tester').classList.contains('hidden')) {

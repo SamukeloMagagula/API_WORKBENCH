@@ -48,8 +48,36 @@ if (PHP_VERSION_ID >= 80000) {
         if ($config['mode'] === 'hosted' && !$config['allowed_hosts']) {
             echo "  \033[33mwarn\033[0m  hosted mode with no allowed_hosts: internal (private-address) APIs will be refused\n";
         }
+        if ($config['mode'] === 'hosted' && $config['auth'] === 'none') {
+            echo "  \033[33mwarn\033[0m  hosted mode with auth = 'none': anyone who can open the page can use the proxy, and nothing is logged\n";
+        }
     } catch (Throwable $e) {
         $report(false, 'config valid', $e->getMessage());
+        $config = null;
+    }
+
+    // Sign-in and shared storage go through devhub: its config, its database, its tables.
+    if ($config !== null && $config['auth'] === 'devhub') {
+        echo "\nauth = devhub\n";
+        $report(extension_loaded('pdo_mysql'), 'pdo_mysql extension loaded',
+            extension_loaded('pdo_mysql') ? '' : 'Rocky/RHEL: dnf install php-mysqlnd, then restart httpd/php-fpm');
+        $path = (string) $config['devhub_config'];
+        $report(is_readable($path), 'devhub config readable', $path);
+        if (is_readable($path) && extension_loaded('pdo_mysql')) {
+            try {
+                require_once $path;
+                $db = connect();
+                $report(true, 'devhub database connects', (string) $db->query('SELECT DATABASE()')->fetchColumn());
+                foreach (['users', 'activity_log', 'apiwb_items'] as $table) {
+                    $found = $db->query("SHOW TABLES LIKE '$table'")->fetchColumn() !== false;
+                    $report($found, "table $table present", $found ? '' : ($table === 'apiwb_items'
+                        ? 'run: mariadb <devhub database> < schema.sql' : 'is devhub_config pointing at the devhub database?'));
+                }
+            } catch (Throwable $e) {
+                $report(false, 'devhub database connects', $e->getMessage());
+            }
+        }
+        echo "  \033[2minfo\033[0m  sign-in is read from devhub's PHP session: both apps must be served from the same host\n";
     }
 }
 

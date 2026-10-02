@@ -102,6 +102,32 @@ export function highlightJson(json) {
   );
 }
 
+/**
+ * Opens a modal dialog. Esc, the × button and a click on the backdrop close it.
+ * @returns {{ close: () => void, root: HTMLElement }}
+ */
+export function openModal({ title, body, actions = [], size = '' }) {
+  let backdrop;
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+
+  const dialog = h('div', { class: `modal-content ${size}`, role: 'dialog', ariaModal: 'true' },
+    h('div', { class: 'modal-header' },
+      h('h2', { text: title }),
+      h('button', { class: 'btn-close', type: 'button', title: 'Close', text: '×', onclick: close })),
+    body,
+    actions.length ? h('div', { class: 'form-actions' }, ...actions) : null,
+  );
+  backdrop = h('div', { class: 'modal', onmousedown: (e) => { if (e.target === backdrop) close(); } }, dialog);
+  document.body.append(backdrop);
+  document.addEventListener('keydown', onKey);
+  dialog.querySelector('input, textarea, select')?.focus();
+  return { close, root: dialog };
+}
+
 export function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;

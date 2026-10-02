@@ -1,5 +1,5 @@
 # Only "Require" here: Options/DirectoryIndex need broader AllowOverride, and a directive
 # Apache is not allowed to read here makes it answer 500 for every file in the folder.
-<FilesMatch "^(config|config\.example|check)\.php$|^\.">
+<FilesMatch "^(config|config\.example|check|bootstrap)\.php$|\.sql$|^\.">
     Require all denied
 </FilesMatch>

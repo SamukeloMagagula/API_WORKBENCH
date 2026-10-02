@@ -51,6 +51,28 @@ code { font-family: var(--mono); font-size: .9em; background: var(--grey-200); b
 .tab:hover { color: var(--white); }
 .tab.active { color: var(--white); font-weight: 600; border-bottom-color: var(--red); }
 
+.header-user { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.welcome { font-size: 13px; color: #a1a1aa; white-space: nowrap; }
+.welcome strong { color: var(--white); font-weight: 600; }
+.btn.btn-ghost-light { background: transparent; color: var(--white); border-color: rgba(255,255,255,.28); }
+.btn.btn-ghost-light:hover { background: rgba(255,255,255,.10); border-color: rgba(255,255,255,.5); }
+
+/* ---- Modals ---- */
+.modal { position: fixed; inset: 0; background: rgba(17,18,20,.55); display: flex; align-items: center; justify-content: center; z-index: 70; padding: 20px; }
+.modal-content {
+    background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius-lg);
+    box-shadow: 0 16px 48px rgba(0,0,0,.18); padding: 22px 24px; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto;
+}
+.modal-lg { max-width: 820px; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--grey-200); }
+.modal-header h2 { font-size: 18px; font-weight: 650; }
+.btn-close { border: none; background: none; font-size: 24px; line-height: 1; color: var(--grey-500); cursor: pointer; padding: 0 4px; border-radius: var(--radius-sm); }
+.btn-close:hover { color: var(--ink); }
+.form-group { margin-bottom: 15px; display: flex; flex-direction: column; gap: 6px; }
+.form-group > label > input, .form-group > label > select { width: 100%; }
+.form-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 18px; }
+.code-export { max-height: 55vh; white-space: pre; }
+
 
 /* ---- Layout ---- */
 .view { flex: 1; min-height: 0; display: grid; }
@@ -160,7 +182,17 @@ label.check.small { font-size: 12.5px; }
 /* ---- Tester ---- */
 .request-name { font-size: 20px; font-weight: 650; letter-spacing: -.01em; cursor: pointer; width: max-content; max-width: 100%; }
 .request-name:hover { color: var(--red); }
-.request-bar { display: flex; gap: 8px; }
+.request-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.env-picker { flex-direction: row; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--grey-500); }
+.env-picker select { font-size: 13px; padding: 6px 9px; max-width: 280px; text-transform: none; letter-spacing: normal; font-weight: 500; }
+.request-block { display: flex; flex-direction: column; gap: 6px; }
+.request-bar { display: flex; gap: 8px; flex-wrap: wrap; }
+.request-bar .url-input { min-width: 240px; }
+.url-preview { font-family: var(--mono); font-size: 12px; color: var(--grey-500); padding-left: 124px; overflow-wrap: anywhere; }
+.url-preview.error { color: var(--red-dark); }
+@media (max-width: 900px) { .url-preview { padding-left: 0; } }
+.collection-bar { display: flex; flex-direction: column; gap: 6px; }
+.collection-bar .hint { margin: 0 2px; }
 .method-select { font-family: var(--mono); font-weight: 700; width: 116px; }
 .url-input { flex: 1; font-family: var(--mono); font-size: 13px; }
 .panel {

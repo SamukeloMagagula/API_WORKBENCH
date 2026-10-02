@@ -24,4 +24,20 @@ return [
 
     // Set to false only if your internal APIs use self-signed certificates.
     'verify_tls' => true,
+
+    // Who may use this install.
+    //   'none'   - anyone who can open the page; everything is saved in the browser only.
+    //   'devhub' - only people signed in to devhub on this same server. Enables shared
+    //              collections and environments (stored in devhub's database) and writes
+    //              every proxied request to devhub's activity log. Run schema.sql first.
+    'auth' => 'none',
+
+    // devhub's database config (the file defining connect(): PDO). Used when auth = 'devhub'.
+    'devhub_config' => '/var/www/html/private/config.php',
+
+    // Where people are sent to sign in, as a URL or path on this server.
+    'devhub_url' => '/devhub/',
+
+    // Largest single collection or environment that can be saved.
+    'max_item_bytes' => 2 * 1024 * 1024,
 ];
