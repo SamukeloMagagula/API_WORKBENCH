@@ -43,38 +43,47 @@ if (PHP_VERSION_ID >= 80000) {
     require __DIR__ . '/src/Config.php';
     try {
         $config = Config::load(__DIR__);
-        $file = is_file(__DIR__ . '/config.php') ? 'config.php' : 'config.example.php (no config.php yet)';
-        $report(true, 'config valid', "$file, mode={$config['mode']}, timeout={$config['timeout_seconds']}s");
+        $report(true, 'settings.php valid', "mode={$config['mode']}, auth={$config['auth']}, timeout={$config['timeout_seconds']}s");
+        // Apache's SetEnv values are not visible to this shell, so say which ones this run used.
+        echo "  \033[2minfo\033[0m  settings come from this shell's APIWB_* environment; Apache's SetEnv values are not visible here\n";
         if ($config['mode'] === 'hosted' && !$config['allowed_hosts']) {
-            echo "  \033[33mwarn\033[0m  hosted mode with no allowed_hosts: internal (private-address) APIs will be refused\n";
+            echo "  \033[33mwarn\033[0m  hosted mode with no APIWB_ALLOWED_HOSTS: internal (private-address) APIs will be refused\n";
         }
         if ($config['mode'] === 'hosted' && $config['auth'] === 'none') {
-            echo "  \033[33mwarn\033[0m  hosted mode with auth = 'none': anyone who can open the page can use the proxy, and nothing is logged\n";
+            echo "  \033[33mwarn\033[0m  hosted mode with APIWB_AUTH=none: anyone who can open the page can use the proxy, and nothing is logged\n";
         }
     } catch (Throwable $e) {
-        $report(false, 'config valid', $e->getMessage());
+        $report(false, 'settings.php valid', $e->getMessage());
         $config = null;
     }
 
-    // Sign-in and shared storage go through devhub: its config, its database, its tables.
+    // Before settings.php, settings lived in an array-returning config.php in the app folder.
+    if (is_file(__DIR__ . '/config.php')) {
+        echo "  \033[33mwarn\033[0m  config.php in the app folder is no longer read: settings come from settings.php"
+            . " (APIWB_* environment), the database from " . ($config['devhub_config'] ?? 'CONFIG_PATH') . ". Move anything you need, then remove it\n";
+    }
+
+    // Sign-in and storage go through devhub: the same config.php, database and tables.
     if ($config !== null && $config['auth'] === 'devhub') {
-        echo "\nauth = devhub\n";
+        echo "\nDatabase (as devhub)\n";
         $report(extension_loaded('pdo_mysql'), 'pdo_mysql extension loaded',
             extension_loaded('pdo_mysql') ? '' : 'Rocky/RHEL: dnf install php-mysqlnd, then restart httpd/php-fpm');
         $path = (string) $config['devhub_config'];
-        $report(is_readable($path), 'devhub config readable', $path);
+        $report(is_readable($path), 'config readable', $path);
         if (is_readable($path) && extension_loaded('pdo_mysql')) {
             try {
                 require_once $path;
+                $report(function_exists('connect'), 'config defines connect(): PDO');
                 $db = connect();
-                $report(true, 'devhub database connects', (string) $db->query('SELECT DATABASE()')->fetchColumn());
+                $report(true, 'database connects', (string) $db->query('SELECT DATABASE()')->fetchColumn());
                 foreach (['users', 'activity_log', 'apiwb_items'] as $table) {
                     $found = $db->query("SHOW TABLES LIKE '$table'")->fetchColumn() !== false;
                     $report($found, "table $table present", $found ? '' : ($table === 'apiwb_items'
-                        ? 'run: mariadb <devhub database> < schema.sql' : 'is devhub_config pointing at the devhub database?'));
+                        ? 'run: mariadb ' . (defined('DB_NAME') ? DB_NAME : 'devhub') . ' < schema.sql'
+                        : 'is APIWB_CONFIG pointing at the devhub database config?'));
                 }
             } catch (Throwable $e) {
-                $report(false, 'devhub database connects', $e->getMessage());
+                $report(false, 'database connects', $e->getMessage());
             }
         }
         echo "  \033[2minfo\033[0m  sign-in is read from devhub's PHP session: both apps must be served from the same host\n";

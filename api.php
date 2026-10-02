@@ -9,7 +9,7 @@ declare(strict_types=1);
 //   POST api.php?action=collection_delete    {id}
 //   ...and the same three for environment(s).
 //
-// Everything except "me" needs auth = 'devhub' in config.php and a devhub sign-in.
+// Everything except "me" needs devhub sign-in (the default; APIWB_AUTH=none turns it off).
 
 require __DIR__ . '/bootstrap.php';
 require __DIR__ . '/src/ItemStore.php';
@@ -49,7 +49,7 @@ try {
     }
 
     if (!$auth->enabled()) {
-        throw new ProxyException('NOT_AVAILABLE', "Shared collections need auth = 'devhub' in config.php.", 404);
+        throw new ProxyException('NOT_AVAILABLE', 'Shared collections are off on this install (APIWB_AUTH=none).', 404);
     }
     $user = $auth->requireUser();
 

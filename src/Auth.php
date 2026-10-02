@@ -95,8 +95,8 @@ final class Auth
         // Checked explicitly so a misplaced config reports itself instead of dying as a
         // bare "failed to open stream" fatal.
         if (!is_readable($path)) {
-            throw new ProxyException('CONFIG_ERROR', "Cannot read devhub's database config at $path. "
-                . 'Check devhub_config in config.php and that the web server user can read it.', 500);
+            throw new ProxyException('CONFIG_ERROR', "Cannot read the database config at $path"
+                . ' — check it exists and is readable by the web server user, or point APIWB_CONFIG at it.', 500);
         }
         require_once $path;
         if (!function_exists('connect')) {

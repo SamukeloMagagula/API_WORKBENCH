@@ -1,5 +1,5 @@
 -- API Workbench tables, created inside devhub's database (they reference devhub's users).
--- Needed only when config.php sets auth = 'devhub'. Safe to run more than once.
+-- Needed unless APIWB_AUTH=none. Safe to run more than once.
 --
 --   mariadb devhub < schema.sql
 --

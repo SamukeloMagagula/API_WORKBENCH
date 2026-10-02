@@ -26,52 +26,89 @@ On Rocky/RHEL with Apache: `sudo dnf install httpd php php-common php-mysqlnd` (
 On Windows: `winget install PHP.PHP.8.3`, then in `php.ini` make sure `extension=curl` is not commented out
 (run `php --ini` to find the file; copy `php.ini-development` to `php.ini` if there is none).
 
+## Configuration
+
+Configuration works the same way as devhub, in two places:
+
+| File | Holds | Where it lives |
+|---|---|---|
+| `settings.php` | every setting, as constants with `APIWB_*` environment overrides | in the app, deployed with it. **Defaults are the production layout**, so a server needs no environment at all |
+| `config.php` | database credentials: `DB_*` constants and `connect(): PDO` | **outside the web root**, at `/var/www/html/private/config.php`. It is the same file devhub uses, because the tables live in devhub's database. `config.example.php` shows its shape |
+
+Nothing secret is in the repository, and nothing secret is inside the served folder.
+
+| Variable | Default | What it is |
+|---|---|---|
+| `APIWB_CONFIG` | `/var/www/html/private/config.php` | the file defining `connect(): PDO` (devhub's) |
+| `APIWB_MODE` | `hosted` | `hosted` blocks loopback, private (10.x, 172.16–31.x, 192.168.x), link-local (incl. cloud metadata 169.254.169.254) and other reserved addresses unless allow-listed. `local` may call anything, including localhost |
+| `APIWB_AUTH` | `devhub` | `devhub`: devhub sign-in, database storage, audit log. `none`: anyone, browser-only storage, no database |
+| `APIWB_DEVHUB_URL` | `/devhub/` | where the "Sign in via devhub" link points |
+| `APIWB_ALLOWED_HOSTS` | *(none)* | comma-separated hosts allowed even if they resolve to private addresses: `api.corp.local,*.dev.corp.local` |
+| `APIWB_RESTRICT_HOSTS` | *(off)* | `1`: *only* the allowed hosts can be called |
+| `APIWB_BLOCKED_HOSTS` | *(none)* | comma-separated hosts never called, in any mode |
+| `APIWB_TIMEOUT` | `30` | per-request timeout, seconds |
+| `APIWB_MAX_REQUEST_MB` | `10` | largest request the proxy accepts |
+| `APIWB_MAX_RESPONSE_MB` | `5` | responses are cut off (and flagged) beyond this |
+| `APIWB_MAX_ITEM_MB` | `2` | largest single collection or environment saved to the database |
+| `APIWB_VERIFY_TLS` | *(on)* | `0` only for internal APIs with self-signed certificates |
+
+On Apache, set overrides with `SetEnv` (needs `mod_env`, on by default), then `systemctl restart httpd`:
+
+```apache
+<Directory "/var/www/html/API_WORKBENCH">
+    SetEnv APIWB_ALLOWED_HOSTS "api.corp.local,*.dev.corp.local"
+</Directory>
+```
+
+Apache's `SetEnv` values are not visible to a shell, so `check.php` reports the settings *its own* run
+sees. Export the same variables before running it if you want them checked too.
+
 ## Run locally
 
+No database and no sign-in: everything is saved in the browser, and localhost can be called.
+
 ```sh
-php -S localhost:8080
+APIWB_MODE=local APIWB_AUTH=none php -S localhost:8080
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:APIWB_MODE = 'local'; $env:APIWB_AUTH = 'none'; php -S localhost:8080
 ```
 
 Open http://localhost:8080 and send a request from the Tester.
 Opening `index.html` directly from disk will not work for the Tester; it must be served by PHP.
 
-Locally, `auth` stays `'none'`: no sign-in, and everything is saved in your browser.
-
 ## Host on a shared server
 
-1. Copy the folder to a PHP-enabled web root (Apache, Nginx + PHP-FPM, or IIS).
-2. `cp config.example.php config.php` and set `'mode' => 'hosted'`.
-3. List the internal hosts people need to reach in `allowed_hosts` (see below).
-4. Turn on devhub sign-in (next section). Without it, anyone who can open the page can use the proxy.
-5. Make sure `src/`, `bootstrap.php`, `check.php`, `config*.php` and `*.sql` are not served:
+1. Copy the folder into the web root, next to devhub, for example `/var/www/html/API_WORKBENCH/`.
+2. Make sure devhub's `/var/www/html/private/config.php` exists. API Workbench reads the same file.
+3. Create the table (next section) and set `APIWB_ALLOWED_HOSTS` for the internal APIs people need.
+4. Make sure `src/`, `bootstrap.php`, `settings.php`, `check.php`, `config*.php` and `*.sql` are not served:
    - **Apache:** the included `.htaccess` files handle this (`AllowOverride All` must be on).
    - **Nginx:**
      ```nginx
-     location ~ ^/(src/|(config(\.example)?|check|bootstrap)\.php$|.*\.sql$|\.) { deny all; }
+     location ~ ^/(src/|(config(\.example)?|check|bootstrap|settings)\.php$|.*\.sql$|\.) { deny all; }
      ```
    - **IIS:** add Request Filtering rules denying the same paths.
-6. Serve it over HTTPS if possible. Bearer tokens and passwords typed into the Tester pass through this server.
+5. Serve it over HTTPS if possible. Bearer tokens and passwords typed into the Tester pass through this server.
 
 ## Sign-in, shared collections and audit (devhub)
 
 API Workbench has no user list of its own. It reads **devhub's PHP session**: both apps run on the same
 server, so they share the session store and cookie, and anyone signed in to devhub is signed in here.
-devhub's CSRF token (kept in that session) protects this app's writes too.
+devhub's CSRF token (kept in that session) protects this app's writes too. The database is reached the
+same way devhub reaches it: `require CONFIG_PATH`, then `connect()`.
 
 1. **Create the table**, in devhub's database. It is additive and safe to re-run. Take a dump first.
    ```sh
    mariadb devhub < schema.sql
    ```
-2. **In `config.php`:**
-   ```php
-   'auth'          => 'devhub',
-   'devhub_config' => '/var/www/html/private/config.php',   // the file defining connect(): PDO
-   'devhub_url'    => '/devhub/',                           // where the "Sign in" link goes
-   ```
-3. **Check it:** `sudo -u apache php check.php` confirms `pdo_mysql`, the devhub config, the connection,
+2. **Check it:** `sudo -u apache php check.php` confirms `pdo_mysql`, the config file, the connection,
    and the `users`, `activity_log` and `apiwb_items` tables.
 
-Once on:
+This is the default (`APIWB_AUTH=devhub`), so there is nothing to switch on. Once running:
 
 | | |
 |---|---|
@@ -114,34 +151,15 @@ the **Environment** picker above the URL bar, and the values are filled in when 
 - **Code** shows the current request as **curl**, **PowerShell** (`Invoke-RestMethod`, works on Windows
   PowerShell 5.1) or **Python** (`requests`), with environment values filled in.
 
-## Configuration (`config.php`)
-
-| Key | Default | Meaning |
-|---|---|---|
-| `mode` | `local` | `local` may call anything, including localhost. `hosted` blocks loopback, private (10.x, 172.16–31.x, 192.168.x), link-local (incl. cloud metadata 169.254.169.254) and other reserved addresses. |
-| `allowed_hosts` | `[]` | Hosts allowed even if they resolve to private addresses. Exact (`api.dev.corp`) or wildcard (`*.dev.corp`). |
-| `restrict_to_allowed_hosts` | `false` | If `true`, *only* `allowed_hosts` can be called. |
-| `blocked_hosts` | `[]` | Never called, in any mode. |
-| `timeout_seconds` | `30` | Per-request timeout. |
-| `max_request_bytes` | 10 MB | Largest request the proxy accepts. |
-| `max_response_bytes` | 5 MB | Responses are cut off (and flagged) beyond this. |
-| `verify_tls` | `true` | Set `false` only for internal APIs with self-signed certificates. |
-| `auth` | `none` | `none`: anyone, browser-only storage. `devhub`: devhub sign-in, server storage, audit log. |
-| `devhub_config` | `/var/www/html/private/config.php` | devhub's database config (defines `connect(): PDO`). |
-| `devhub_url` | `/devhub/` | Where the "Sign in via devhub" link points. |
-| `max_item_bytes` | 2 MB | Largest single collection or environment saved on the server. |
-
-`config.php` is gitignored. When it is missing, `config.example.php` is used.
-
 ## How it works
 
 ```
 Browser (index.html + js/)                       PHP
-  Tester ── POST proxy.php {method,url,...} ──▶  proxy.php  sign-in + CSRF (auth = devhub)
+  Tester ── POST proxy.php {method,url,...} ──▶  proxy.php  sign-in + CSRF (APIWB_AUTH=devhub)
                                                    ProxyRequest  validate input
                                                    HostPolicy    check host against config, resolve DNS once
                                                    Forwarder     send with cURL pinned to that IP
-                                                   activity_log  who sent what (auth = devhub)
+                                                   activity_log  who sent what (APIWB_AUTH=devhub)
          ◀── {status, headers, body, timeMs} ──
   Saved / environments ── api.php ─────────────▶  api.php    Auth (devhub session) + ItemStore (apiwb_items)
   Designer ── runs entirely in the browser (js/openapi.js converts to/from OpenAPI 3)
@@ -158,7 +176,7 @@ Browser (index.html + js/)                       PHP
 ## Troubleshooting
 
 **Start with the health check.** It reports the PHP version, curl, the config, whether every PHP file
-parses on this PHP, and (with `auth = devhub`) the database connection and tables. Run it as the user the
+parses on this PHP, and (unless `APIWB_AUTH=none`) the database connection and tables. Run it as the user the
 web server runs as:
 
 ```sh
@@ -173,12 +191,12 @@ php check.php                    # local
 | Shown | Meaning | Look at |
 |---|---|---|
 | `SERVER_ERROR` / `Fatal: ...` | PHP reached the endpoint and crashed. The message names the file and line | `php check.php` |
-| `CONFIG_ERROR` | PHP too old, curl missing, `config.php` invalid, or devhub's config unreadable | `php check.php` |
-| `NOT_SIGNED_IN` | `auth = devhub` and you are not signed in to devhub | sign in to devhub, then reload |
+| `CONFIG_ERROR` | PHP too old, curl missing, a setting invalid, or the database config unreadable | `php check.php` |
+| `NOT_SIGNED_IN` | you are not signed in to devhub | sign in to devhub, then reload |
 | `CSRF` | the page's session token is stale (signed out and in again elsewhere) | reload the page |
 | `CONFLICT` | someone saved the same shared collection or environment after you loaded it | reload, then redo your change |
 | `MISSING_VARIABLES` | a `{{variable}}` has no value in the chosen environment | the Environment picker, or **Manage** |
-| `URL_NOT_ALLOWED` | hosted mode refused the host | `allowed_hosts` in `config.php` |
+| `URL_NOT_ALLOWED` | hosted mode refused the host | `APIWB_ALLOWED_HOSTS` |
 | `CONNECTION_FAILED` / `TIMEOUT` / `TLS_ERROR` | the proxy ran, the target API did not answer | the target, from the server: `curl -v <url>` |
 | `NETWORK_ERROR` ... *without JSON* | the request never reached the PHP code. The web server refused it, or PHP is not wired up | the web server error log (`/var/log/httpd/error_log`, or the `php -S` terminal) |
 
@@ -218,7 +236,8 @@ bootstrap.php         shared start of both endpoints: JSON error nets, PHP versi
 check.php             command-line health check (not served)
 schema.sql            the apiwb_items table, for devhub's database (not served)
 src/                  server classes (not web-accessible)
-config.example.php    configuration template
+settings.php          every setting, with APIWB_* environment overrides (not served)
+config.example.php    shape of the database config.php, which lives outside the web root
 ```
 
 ## Limits of this version
