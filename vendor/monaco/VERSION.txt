@@ -1,0 +1,1 @@
+monaco-editor 0.52.2 (min/vs), trimmed to: core editor, JSON language + worker, XML highlighting. MIT, see LICENSE.txt.

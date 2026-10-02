@@ -11,6 +11,7 @@ import { resolveRequest, hasVariables } from './variables.js';
 import { listCollections, currentCollection, setCurrentCollection, updateRequests, createCollection, deleteCollection } from './collections.js';
 import { looksLikeCurl, parseCurl } from './curl.js';
 import { GENERATORS } from './codegen.js';
+import { loadMonaco, monacoWanted, setVariableSource, checkJson, createBodyEditor, createResponseViewer } from './editor.js';
 
 const HISTORY_LIMIT = 50;
 const EXPORT_FORMAT = 'api-workbench-requests';
@@ -30,6 +31,11 @@ let params = [];
 let history = load('history', []);
 let sideTab = 'saved';
 const inFlight = new Map(); // tab id -> AbortController
+
+// Monaco editors, once loaded (editor.js). Until then, and if it never loads, the plain
+// textarea and <pre> do the job.
+let bodyEditor = null;
+let resViewer = null;
 
 export function blankRequest() {
   return {
@@ -238,8 +244,15 @@ function renderAuth() {
 function renderBody() {
   const type = req.body.type;
   $$('#body-type .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.body === type));
-  $('#body-text').classList.toggle('hidden', type !== 'json' && type !== 'text');
+  const textual = type === 'json' || type === 'text';
+  const useEditor = !!bodyEditor && textual;
+  $('#body-text').classList.toggle('hidden', !textual || useEditor);
   $('#body-text').value = req.body.text;
+  $('#body-editor').classList.toggle('hidden', !useEditor);
+  if (useEditor) {
+    bodyEditor.setLanguage(type === 'json' ? 'json' : 'plaintext');
+    bodyEditor.setValue(req.body.text);
+  }
   $('#btn-format-body').classList.toggle('hidden', type !== 'json');
   $('#body-form-table').classList.toggle('hidden', type !== 'form');
   $('#body-none-hint').classList.toggle('hidden', type !== 'none');
@@ -249,22 +262,21 @@ function renderBody() {
   updateBodyStatus();
 }
 
+/** JSON check under the body, and as a red squiggle in the editor. {{variables}} are allowed. */
 function updateBodyStatus() {
   const el = $('#body-status');
   el.className = 'hint';
   el.textContent = '';
+  bodyEditor?.setError(null);
   if (req.body.type !== 'json' || !req.body.text.trim()) return;
-  if (hasVariables(req.body.text)) {
-    el.textContent = 'Contains {{variables}}: checked after they are filled in';
-    return;
-  }
-  try {
-    JSON.parse(req.body.text);
-    el.textContent = 'Valid JSON';
-    el.classList.add('ok');
-  } catch (e) {
-    el.textContent = e.message;
+  const error = checkJson(req.body.text);
+  if (error) {
+    el.textContent = `Line ${error.line}, column ${error.column}: ${error.message}`;
     el.classList.add('error');
+    bodyEditor?.setError(error);
+  } else {
+    el.textContent = hasVariables(req.body.text) ? 'Valid JSON ({{variables}} are filled in when sent)' : 'Valid JSON';
+    el.classList.add('ok');
   }
 }
 
@@ -838,8 +850,11 @@ function renderResponseBody() {
   const pre = $('#res-body');
   const data = lastResponse;
   if (!data?.ok) return;
+  // Binary and empty bodies are a sentence, not code: those always use the <pre>.
+  const showPre = () => { pre.classList.remove('hidden'); $('#res-editor').classList.add('hidden'); };
 
   if (data.bodyEncoding === 'base64') {
+    showPre();
     pre.replaceChildren(
       `Binary response (${formatBytes(data.sizeBytes)}, ${responseHeader('content-type') || 'unknown type'}). `,
       h('button', { class: 'btn small', text: 'Download', onclick: downloadBinary }),
@@ -847,12 +862,33 @@ function renderResponseBody() {
     return;
   }
   if (data.body === '') {
+    showPre();
     pre.replaceChildren(h('span', { class: 'muted', text: '(empty body)' }));
     return;
   }
 
   const raw = $('#res-raw').checked;
-  const looksJson = responseHeader('content-type').includes('json') || /^\s*[[{]/.test(data.body);
+  const contentType = responseHeader('content-type');
+  const looksJson = contentType.includes('json') || /^\s*[[{]/.test(data.body);
+
+  if (resViewer) {
+    let text = data.body;
+    let language = 'plaintext';
+    if (looksJson) {
+      language = 'json';
+      if (!raw) {
+        try { text = JSON.stringify(JSON.parse(data.body), null, 2); } catch { language = 'plaintext'; }
+      }
+    } else if (/xml|html/.test(contentType) || /^\s*</.test(data.body)) {
+      language = 'xml';
+    }
+    pre.classList.add('hidden');
+    $('#res-editor').classList.remove('hidden');
+    resViewer.show(text, language);
+    return;
+  }
+
+  showPre();
   if (!raw && looksJson) {
     try {
       pre.innerHTML = highlightJson(JSON.stringify(JSON.parse(data.body), null, 2));
@@ -891,8 +927,11 @@ function copyResponse() {
 const ZOOM_STEPS = [0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5];
 const BASE_FONT_PX = 13;
 
+let currentZoom = 1;
 function applyZoom(zoom) {
+  currentZoom = zoom;
   $('#response-panel').style.setProperty('--res-font', `${BASE_FONT_PX * zoom}px`);
+  resViewer?.setFontSize(BASE_FONT_PX * zoom);
   $('#btn-zoom-reset').textContent = `${Math.round(zoom * 100)}%`;
   $('#btn-zoom-out').disabled = zoom <= ZOOM_STEPS[0];
   $('#btn-zoom-in').disabled = zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1];
@@ -947,6 +986,28 @@ function restoreTabs() {
     ? makeTab(draft.req, { saved: draft.currentSaved ?? null, name: draft.currentName || UNTITLED })
     : makeTab()];
   activeId = tabs[0].id;
+}
+
+/** Swaps in the Monaco editors once they load. The page is usable before, and without, them. */
+function startEditors() {
+  setVariableSource(activeVariables);
+  if (!monacoWanted()) return;
+  loadMonaco().then((monaco) => {
+    bodyEditor = createBodyEditor(monaco, $('#body-editor'), {
+      onChange: (text) => {
+        req.body.text = text;
+        $('#body-text').value = text;
+        updateBodyStatus();
+        persistTabs();
+      },
+    });
+    resViewer = createResponseViewer(monaco, $('#res-editor'));
+    resViewer.setFontSize(BASE_FONT_PX * currentZoom);
+    renderBody();
+    renderResponseBody();
+  }).catch((e) => {
+    console.warn('Monaco did not load; using the plain editors.', e);
+  });
 }
 
 const testerVisible = () => !$('#view-tester').classList.contains('hidden');
@@ -1008,6 +1069,7 @@ export function initTester() {
     try {
       req.body.text = JSON.stringify(JSON.parse(req.body.text), null, 2);
       $('#body-text').value = req.body.text;
+      bodyEditor?.setValue(req.body.text);
       updateBodyStatus();
       persistTabs();
     } catch (e) {
@@ -1035,7 +1097,11 @@ export function initTester() {
     renderSide();
   });
 
-  onEnvironmentChange(updateUrlPreview);
+  onEnvironmentChange(() => {
+    updateUrlPreview();
+    bodyEditor?.refreshVariables();
+  });
+  startEditors();
 
   document.addEventListener('keydown', (e) => {
     if (!testerVisible() || !(e.ctrlKey || e.metaKey) || document.querySelector('.modal')) return;

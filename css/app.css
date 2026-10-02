@@ -386,6 +386,16 @@ label.check.small { font-size: 12.5px; }
 }
 .zoom-level:hover { color: var(--red); }
 
+/* Monaco editors (js/editor.js). Body: drag the bottom edge to resize. Response: fills its pane. */
+.monaco-box { border: 1px solid var(--grey-200); border-radius: var(--radius-md); overflow: hidden; }
+.monaco-box:focus-within { border-color: var(--black); box-shadow: var(--focus); }
+.body-editor { height: 300px; min-height: 120px; resize: vertical; }
+.res-editor { height: 60vh; min-height: 200px; }
+.response.expanded .res-editor { flex: 1; height: auto; }
+/* {{variables}} inside the editors: green when the environment has a value, red when it does not */
+.mono-var { color: #15803d !important; background: #f0fdf4; border-radius: 3px; font-weight: 600; }
+.mono-var-missing { color: var(--red-dark) !important; background: #fdecee; border-radius: 3px; text-decoration: underline wavy var(--red); }
+
 /* Expanded response: fills the window, panes scroll inside it, Esc closes */
 .response.expanded {
     position: fixed; inset: 16px; z-index: 60; margin: 0; padding: 14px 18px 18px;

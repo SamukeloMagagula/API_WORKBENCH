@@ -178,6 +178,23 @@ the **Environment** picker above the URL bar, and the values are filled in when 
 - A request with an unfilled variable is not sent. The error names the variable.
 - Saved requests and history keep the `{{variables}}`, so the same request works against every environment.
 
+## Code editor (Monaco)
+
+The request body and the response use **Monaco**, the editor from VS Code:
+
+- **Body:** JSON highlighting, a red squiggle on the exact error as you type (`{{variables}}` are
+  allowed), bracket matching, folding, multi-cursor, Ctrl+F / Ctrl+H. Typing `{{` suggests the active
+  environment's variables. Each `{{variable}}` shows green when it has a value and red when it does not,
+  and hovering shows the value. Drag the bottom edge to resize.
+- **Response:** read-only, with folding, Ctrl+F search, copying any selection, and handling of large
+  bodies. JSON and XML/HTML are highlighted. A− / A+ resize its text.
+
+It is served from `vendor/monaco/` (no CDN, so it works on a server without internet). It is loaded after
+the page draws, so the page is just as fast. On touch devices, or if it fails to load, the plain text box
+and response view are used instead. The copy is trimmed to what the app uses (core editor, JSON
+language and worker, XML highlighting), about 4.5 MB of the 14 MB package. See
+`vendor/monaco/VERSION.txt`.
+
 ## curl in, code out
 
 - **Import curl**, or paste a curl command straight into the URL box. It understands browser
@@ -276,7 +293,9 @@ js/designer.js        Designer tab
 js/openapi.js         designer model <-> OpenAPI 3, validation, "Try it"
 js/kvtable.js         editable name/value table
 js/dom.js, storage.js helpers (DOM, modal, toast, localStorage)
+js/editor.js          Monaco loading, the body editor and the response viewer
 vendor/js-yaml.min.js YAML support (MIT)
+vendor/monaco/        Monaco editor 0.52.2, trimmed (MIT)
 ```
 
 ## Limits of this version

@@ -131,6 +131,7 @@
               <span class="hint" id="body-status"></span>
             </div>
             <textarea id="body-text" class="code hidden" spellcheck="false" rows="12"></textarea>
+            <div id="body-editor" class="monaco-box body-editor hidden"></div>
             <div id="body-form-table" class="hidden"></div>
             <p class="hint" id="body-none-hint">This request does not have a body.</p>
           </div>
@@ -162,7 +163,7 @@
             <p>Click Send to get a response</p>
             <p class="muted">Ctrl+Enter sends · Ctrl+S saves</p>
           </div>
-          <div class="pane hidden" data-group="res" data-pane="body"><pre id="res-body" class="code-view"></pre></div>
+          <div class="pane hidden" data-group="res" data-pane="body"><pre id="res-body" class="code-view"></pre><div id="res-editor" class="monaco-box res-editor hidden"></div></div>
           <div class="pane hidden" data-group="res" data-pane="headers"><table class="kv-view" id="res-headers"></table></div>
         </div>
       </div>
