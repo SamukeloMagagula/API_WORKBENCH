@@ -1,6 +1,6 @@
-// The Tester tab: build a request, send it through proxy.php, show the response.
-// History and the current draft are kept in localStorage; saved requests live in
-// collections (collections.js); {{variables}} come from the active environment.
+// The Tester tab: build requests in tabs, send them through proxy.php, show responses.
+// Open tabs and history are kept in localStorage; saved requests live in collections
+// (collections.js); {{variables}} come from the active environment.
 
 import { $, $$, h, toast, downloadFile, pickFile, copyText, wireSubtabs, showPane, highlightJson, formatBytes, openModal } from './dom.js';
 import { load, save, uid } from './storage.js';
@@ -15,15 +15,21 @@ import { GENERATORS } from './codegen.js';
 const HISTORY_LIMIT = 50;
 const EXPORT_FORMAT = 'api-workbench-requests';
 const SCOPE_LABEL = { local: '', private: ' (only me)', shared: ' (shared)' };
+const UNTITLED = 'Untitled request';
 
+// Open request tabs. The active tab's fields are mirrored in the variables below, which
+// the rest of this file works on; stashActive() writes them back into the tab.
+let tabs = []; // [{ id, req, saved, name, response }]
+let activeId = null;
 let req = blankRequest();
+let currentSaved = null; // { collectionKey, id } of the saved request this tab edits, if any
+let currentName = UNTITLED;
+let lastResponse = null;
+
 let params = [];
-let currentSaved = null; // { collectionKey, id } of the saved request being edited, if any
-let currentName = 'Untitled request';
 let history = load('history', []);
 let sideTab = 'saved';
-let inFlight = null;
-let lastResponse = null;
+const inFlight = new Map(); // tab id -> AbortController
 
 export function blankRequest() {
   return {
@@ -53,10 +59,107 @@ function normalize(r = {}) {
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
-let draftTimer;
-function persistDraft() {
-  clearTimeout(draftTimer);
-  draftTimer = setTimeout(() => save('draft', { req, currentSaved, currentName }), 250);
+// ---------------------------------------------------------------- tabs
+
+function makeTab(request = blankRequest(), { saved = null, name = UNTITLED } = {}) {
+  return { id: uid(), req: normalize(clone(request)), saved, name, response: null };
+}
+
+const activeTab = () => tabs.find((t) => t.id === activeId);
+
+function stashActive() {
+  const tab = activeTab();
+  if (tab) Object.assign(tab, { req, saved: currentSaved, name: currentName, response: lastResponse });
+}
+
+function tabTitle(tab) {
+  if (tab.name !== UNTITLED) return tab.name;
+  return tab.req.url.replace(/^https?:\/\//, '') || UNTITLED;
+}
+
+/** A tab nobody has typed into yet: opening something reuses it rather than adding a tab. */
+function isPristine(tab) {
+  const r = tab.req;
+  return !tab.saved && tab.name === UNTITLED && !r.url && !r.headers.length && r.body.type === 'none' && r.auth.type === 'none';
+}
+
+function activate(id) {
+  stashActive();
+  const tab = tabs.find((t) => t.id === id) || tabs[0];
+  activeId = tab.id;
+  ({ req, saved: currentSaved, name: currentName, response: lastResponse } = tab);
+  renderRequest();
+  if (lastResponse) showResponse(lastResponse); else clearResponse();
+  updateSendButton();
+  renderTabs();
+  renderSide();
+  persistTabs();
+}
+
+function newTab(request, options) {
+  stashActive();
+  const tab = makeTab(request, options);
+  tabs.push(tab);
+  activate(tab.id);
+}
+
+function closeTab(id) {
+  inFlight.get(id)?.abort();
+  stashActive();
+  const i = tabs.findIndex((t) => t.id === id);
+  if (i < 0) return;
+  tabs.splice(i, 1);
+  if (!tabs.length) tabs.push(makeTab());
+  if (id === activeId) {
+    activeId = null; // nothing to stash: that tab is gone
+    activate(tabs[Math.min(i, tabs.length - 1)].id);
+  } else {
+    renderTabs();
+    persistTabs();
+  }
+}
+
+function renderTabs() {
+  stashActive();
+  $('#req-tabs').replaceChildren(
+    ...tabs.map((tab) => h('div', {
+      class: `req-tab${tab.id === activeId ? ' active' : ''}`, role: 'tab', title: tabTitle(tab),
+      onclick: () => { if (tab.id !== activeId) activate(tab.id); },
+      onauxclick: (e) => { if (e.button === 1) closeTab(tab.id); }, // middle click closes, as in browsers
+    },
+    h('span', { class: `method ${tab.req.method}`, text: tab.req.method }),
+    h('span', { class: 'req-tab-label', text: tabTitle(tab) }),
+    inFlight.has(tab.id) ? h('span', { class: 'req-tab-busy', title: 'Sending…' }) : null,
+    h('button', { type: 'button', class: 'req-tab-close', title: 'Close tab', text: '×', onclick: (e) => { e.stopPropagation(); closeTab(tab.id); } }))),
+    h('button', { type: 'button', class: 'req-tab-new', title: 'New tab', text: '+', onclick: () => newTab() }),
+  );
+  $('#req-tabs .req-tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+let persistTimer;
+/** Saves the open tabs (requests only: responses can be large and are not worth keeping). */
+function persistTabs() {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    stashActive();
+    save('tabs', { activeId, tabs: tabs.map(({ response, ...tab }) => tab) });
+  }, 250);
+}
+
+/** Opens a request: in the tab already holding that saved request, in an empty tab, or in a new one. */
+export function loadRequest(request, { saved = null, name = UNTITLED } = {}) {
+  stashActive();
+  if (saved) {
+    const open = tabs.find((t) => t.saved?.collectionKey === saved.collectionKey && t.saved.id === saved.id);
+    if (open) return activate(open.id);
+  }
+  const tab = activeTab();
+  if (tab && isPristine(tab)) {
+    Object.assign(tab, { req: normalize(clone(request)), saved, name, response: null });
+    activeId = null; // force a full reload of the reused tab
+    return activate(tab.id);
+  }
+  newTab(request, { saved, name });
 }
 
 // ---------------------------------------------------------------- URL <-> params
@@ -101,20 +204,19 @@ function buildUrl(url, rows) {
 function renderParams() {
   renderKvTable($('#params-table'), params, {
     withEnabled: false,
-    namePlaceholder: 'Query parameter',
     onChange: () => {
       req.url = buildUrl(req.url, params);
       $('#req-url').value = req.url;
       updateUrlPreview();
-      persistDraft();
+      renderTabs();
+      persistTabs();
     },
   });
 }
 
 function renderHeaders() {
   renderKvTable($('#headers-table'), req.headers, {
-    namePlaceholder: 'Header',
-    onChange: () => { updateHeaderCount(); persistDraft(); },
+    onChange: () => { updateHeaderCount(); persistTabs(); },
   });
   updateHeaderCount();
 }
@@ -140,8 +242,9 @@ function renderBody() {
   $('#body-text').value = req.body.text;
   $('#btn-format-body').classList.toggle('hidden', type !== 'json');
   $('#body-form-table').classList.toggle('hidden', type !== 'form');
+  $('#body-none-hint').classList.toggle('hidden', type !== 'none');
   if (type === 'form') {
-    renderKvTable($('#body-form-table'), req.body.form, { namePlaceholder: 'Field', onChange: persistDraft });
+    renderKvTable($('#body-form-table'), req.body.form, { onChange: persistTabs });
   }
   updateBodyStatus();
 }
@@ -173,33 +276,29 @@ function updateUrlPreview() {
     return;
   }
   const { request, missing } = resolveRequest(req, activeVariables());
-  el.classList.remove('hidden');
   el.className = `url-preview${missing.length ? ' error' : ''}`;
   el.textContent = missing.length
     ? `No value for ${missing.map((n) => `{{${n}}}`).join(', ')}${activeEnvironment() ? ` in “${activeEnvironment().name}”` : ': choose an environment'}`
     : `→ ${request.url}`;
 }
 
+function renderRequestName() {
+  const el = $('#request-name');
+  el.textContent = currentName !== UNTITLED ? currentName : (req.url || UNTITLED);
+  el.classList.toggle('untitled', currentName === UNTITLED);
+}
+
 function renderRequest() {
   $('#req-method').value = req.method;
+  $('#req-method').className = `method-select m-${req.method}`;
   $('#req-url').value = req.url;
-  $('#request-name').textContent = currentName;
+  renderRequestName();
   params = parseParams(req.url);
   renderParams();
   renderHeaders();
   renderAuth();
   renderBody();
   updateUrlPreview();
-}
-
-/** Replaces the editor contents with a request (from saved, history, curl or the designer's "Try it"). */
-export function loadRequest(request, { saved = null, name = 'Untitled request' } = {}) {
-  req = normalize(clone(request));
-  currentSaved = saved;
-  currentName = name;
-  renderRequest();
-  renderSide();
-  persistDraft();
 }
 
 // ---------------------------------------------------------------- sidebar: collections + history
@@ -213,21 +312,41 @@ function renderCollectionBar() {
     onchange: (e) => { setCurrentCollection(e.target.value); renderSide(); },
   }, ...collections.map((c) => h('option', { value: c.key, text: c.name + SCOPE_LABEL[c.scope], selected: c.key === current.key })));
 
-  const children = [h('div', { class: 'side-actions' }, select)];
+  const row = [select];
   if (serverStorage()) {
-    const buttons = [h('button', { class: 'btn small', text: '+ Collection', onclick: newCollectionDialog })];
-    if (current.scope !== 'local') buttons.push(h('button', { class: 'btn small', text: 'Settings', onclick: () => collectionDialog(current) }));
-    children.push(h('div', { class: 'side-actions' }, ...buttons));
-    if (current.scope === 'shared') {
-      children.push(h('p', { class: 'hint', text: `Shared by ${current.owner}${current.updatedBy ? ` · last saved by ${current.updatedBy}` : ''}` }));
-    }
-  } else if (session.auth === 'login' && session.signedIn && session.storageError) {
-    children.push(h('p', { class: 'hint error', text: `Server collections unavailable: ${session.storageError}` }));
+    row.push(h('button', { class: 'btn small icon-only', title: 'New collection', text: '+', onclick: newCollectionDialog }));
+    if (current.scope !== 'local') row.push(h('button', { class: 'btn small', text: 'Settings', onclick: () => collectionDialog(current) }));
+  }
+  const children = [h('div', { class: 'side-actions' }, ...row)];
+  if (current.scope === 'shared') {
+    children.push(h('p', { class: 'hint', text: `Shared by ${current.owner}${current.updatedBy ? ` · last saved by ${current.updatedBy}` : ''}` }));
+  }
+  if (session.auth === 'login' && session.signedIn && session.storageError) {
+    children.push(h('p', { class: 'hint error', text: `Saving to the server is unavailable: ${session.storageError}` }));
   }
   bar.replaceChildren(...children);
 }
 
+/** "Today", "Yesterday", or the date. */
+function dayLabel(ts) {
+  const day = new Date(ts);
+  const today = new Date();
+  const startOf = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diff = Math.round((startOf(today) - startOf(day)) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return day.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+function timeOf(ts) {
+  return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+const matches = (filter, ...fields) => !filter || fields.some((f) => String(f ?? '').toLowerCase().includes(filter));
+
 function renderSide() {
+  const filter = $('#side-filter').value.trim().toLowerCase();
+  $('#side-title').textContent = sideTab === 'saved' ? 'Saved' : 'History';
   $('#collection-bar').classList.toggle('hidden', sideTab !== 'saved');
   $('#saved-actions').classList.toggle('hidden', sideTab !== 'saved');
   $('#history-actions').classList.toggle('hidden', sideTab !== 'history');
@@ -237,7 +356,7 @@ function renderSide() {
   if (sideTab === 'saved') {
     renderCollectionBar();
     const collection = currentCollection();
-    const requests = collection.requests;
+    const requests = collection.requests.filter((item) => matches(filter, item.name, item.request.url, item.request.method));
     list.replaceChildren(
       ...(requests.length ? requests.map((item) => h('li', {
         class: currentSaved?.collectionKey === collection.key && currentSaved.id === item.id ? 'active' : '',
@@ -250,33 +369,45 @@ function renderSide() {
         class: 'btn icon remove', title: 'Delete', text: '×',
         onclick: (e) => { e.stopPropagation(); deleteSaved(item.id); },
       }),
-      )) : [h('li', { class: 'empty', text: 'No saved requests in this collection yet. Use Save to add one.' })]),
+      )) : [h('li', { class: 'empty', text: filter ? 'Nothing matches the filter.' : 'No saved requests in this collection yet. Use Save to add one.' })]),
     );
   } else {
-    list.replaceChildren(
-      ...(history.length ? history.map((item) => h('li', {
-        title: item.displayUrl || item.request.url,
+    const items = history.filter((item) => matches(filter, item.displayUrl, item.request.url, item.request.method, item.status));
+    const rows = [];
+    let group = null;
+    for (const item of items) {
+      const label = dayLabel(item.at);
+      if (label !== group) {
+        group = label;
+        rows.push(h('li', { class: 'group-label', text: label }));
+      }
+      rows.push(h('li', {
+        title: `${item.displayUrl || item.request.url}\n${item.status} · ${timeOf(item.at)}`,
         onclick: () => loadRequest(item.request),
       },
       h('span', { class: `method ${item.request.method}`, text: item.request.method }),
-      h('span', { class: 'label' },
-        (item.displayUrl || item.request.url).replace(/^https?:\/\//, ''),
-        h('div', { class: 'sub', text: `${item.status} · ${timeAgo(item.at)}` })),
+      h('span', { class: 'label', text: (item.displayUrl || item.request.url).replace(/^https?:\/\//, '') }),
       h('button', {
         class: 'btn icon remove', title: 'Remove from history', text: '×',
         onclick: (e) => { e.stopPropagation(); deleteHistory(item.id); },
-      }),
-      )) : [h('li', { class: 'empty', text: 'Requests you send appear here.' })]),
-    );
+      })));
+    }
+    list.replaceChildren(...(rows.length ? rows : [h('li', { class: 'empty', text: filter ? 'Nothing matches the filter.' : 'Requests you send appear here.' })]));
   }
+  renderSideFoot();
 }
 
-function timeAgo(ts) {
-  const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return new Date(ts).toLocaleDateString();
+/** The footer card inviting people to share, shown while they only use the browser collection. */
+function renderSideFoot() {
+  const foot = $('#side-foot');
+  const show = sideTab === 'saved' && serverStorage() && currentCollection().scope === 'local';
+  foot.classList.toggle('hidden', !show);
+  if (!show) return;
+  foot.replaceChildren(
+    h('strong', { text: 'Create collections' }),
+    h('p', { text: 'Collections are saved on the server, so they follow you to any machine and can be shared with your team.' }),
+    h('button', { class: 'btn small', text: 'Create a Collection', onclick: newCollectionDialog }),
+  );
 }
 
 /** The saved request being edited, if it belongs to the collection on screen. */
@@ -297,7 +428,7 @@ async function saveCurrent() {
     if (ok) toast(`Saved “${currentName}” in ${collection.name}`);
     return;
   }
-  const suggested = currentName !== 'Untitled request' ? currentName : suggestName();
+  const suggested = currentName !== UNTITLED ? currentName : suggestName();
   const name = prompt(`Save to “${collection.name}” as:`, suggested);
   if (name === null) return;
   const item = { id: uid(), name: name.trim() || suggested, request: clone(req) };
@@ -305,8 +436,9 @@ async function saveCurrent() {
   if (ok) {
     currentSaved = { collectionKey: collection.key, id: item.id };
     currentName = item.name;
-    $('#request-name').textContent = currentName;
-    persistDraft();
+    renderRequestName();
+    renderTabs();
+    persistTabs();
     toast(`Saved “${item.name}” in ${collection.name}`);
   }
   sideTab = 'saved';
@@ -320,10 +452,11 @@ function suggestName() {
 }
 
 async function renameCurrent() {
-  const name = prompt('Rename request:', currentName);
+  const name = prompt('Rename request:', currentName !== UNTITLED ? currentName : suggestName());
   if (name === null || !name.trim()) return;
   currentName = name.trim();
-  $('#request-name').textContent = currentName;
+  renderRequestName();
+  renderTabs();
   const collection = editingInCurrent();
   if (collection) {
     await updateRequests(collection, (list) => {
@@ -332,7 +465,7 @@ async function renameCurrent() {
     });
     renderSide();
   }
-  persistDraft();
+  persistTabs();
 }
 
 async function deleteSaved(id) {
@@ -362,9 +495,9 @@ function exportSaved() {
   downloadFile(`api-workbench-${slug}.json`, JSON.stringify(payload, null, 2));
 }
 
-async function importSaved() {
+async function importFile() {
   const file = await pickFile('.json,application/json');
-  if (!file) return;
+  if (!file) return false;
   try {
     const data = JSON.parse(file.text);
     const items = Array.isArray(data) ? data : data.items;
@@ -379,8 +512,10 @@ async function importSaved() {
     }
     sideTab = 'saved';
     renderSide();
+    return true;
   } catch (e) {
     toast(`Import failed: ${e.message}`, 'error');
+    return false;
   }
 }
 
@@ -451,12 +586,12 @@ function collectionDialog(collection) {
   const modal = openModal({ title: 'Collection settings', body: form.body, actions });
 }
 
-// ---------------------------------------------------------------- curl in, code out
+// ---------------------------------------------------------------- import, code out
 
 function importCurl(text) {
   try {
     const { request, warnings } = parseCurl(text);
-    loadRequest(request, { name: 'Imported from curl' });
+    loadRequest(request, { name: UNTITLED });
     toast(warnings.length ? `Imported, with notes: ${warnings.join(' ')}` : 'Imported from curl', warnings.length ? 'error' : 'info');
     return true;
   } catch (e) {
@@ -465,17 +600,28 @@ function importCurl(text) {
   }
 }
 
-function curlDialog() {
-  const input = h('textarea', { class: 'code', rows: 10, spellcheck: false, placeholder: "curl -X POST 'https://api.example.com/users' -H 'Content-Type: application/json' -d '{\"name\":\"Ada\"}'" });
+/** One Import for everything: a pasted curl command, or a collection file. */
+function importDialog() {
+  const input = h('textarea', { class: 'code', rows: 9, spellcheck: false, placeholder: "curl -X POST 'https://api.example.com/users' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\":\"Ada\"}'" });
   const modal = openModal({
-    title: 'Import from curl',
+    title: 'Import',
     size: 'modal-lg',
     body: h('div', {},
-      input,
-      h('p', { class: 'hint', text: 'Paste a curl command, for example from your browser\'s DevTools (Network → right-click → Copy as cURL) or from API docs. Pasting one straight into the URL box works too.' })),
+      h('div', { class: 'form-group' },
+        h('label', { text: 'Paste a curl command' }),
+        input,
+        h('p', { class: 'hint', text: 'From your browser\'s DevTools (Network → right-click → Copy as cURL) or from API docs. It opens in a new tab. Pasting one into the URL box works too.' })),
+      h('div', { class: 'import-or' }, h('span', { text: 'or' })),
+      h('div', { class: 'form-group' },
+        h('label', { text: `Import a collection file into “${currentCollection().name}”` }),
+        h('div', {}, h('button', {
+          class: 'btn', type: 'button', text: 'Choose file…',
+          onclick: async () => { if (await importFile()) modal.close(); },
+        })),
+        h('p', { class: 'hint', text: 'A .json file made with Export.' }))),
     actions: [
       h('button', { class: 'btn', text: 'Cancel', onclick: () => modal.close() }),
-      h('button', { class: 'btn primary', text: 'Import', onclick: () => { if (importCurl(input.value)) modal.close(); } }),
+      h('button', { class: 'btn primary', text: 'Import curl', onclick: () => { if (importCurl(input.value)) modal.close(); } }),
     ],
   });
 }
@@ -488,10 +634,10 @@ function codeDialog() {
   let current = load('codeLanguage', 'curl');
   if (!GENERATORS.some((g) => g.id === current)) current = 'curl';
   const pre = h('pre', { class: 'code-view code-export' });
-  const tabs = h('div', { class: 'seg' });
+  const tabsEl = h('div', { class: 'seg' });
   const render = () => {
     pre.textContent = GENERATORS.find((g) => g.id === current).fn(outgoing);
-    tabs.replaceChildren(...GENERATORS.map((g) => h('button', {
+    tabsEl.replaceChildren(...GENERATORS.map((g) => h('button', {
       class: `seg-btn${g.id === current ? ' active' : ''}`, type: 'button', text: g.label,
       onclick: () => { current = g.id; save('codeLanguage', current); render(); },
     })));
@@ -503,9 +649,9 @@ function codeDialog() {
   if (activeEnvironment() && !missing.length) notes.push(h('p', { class: 'hint', text: `Variables filled in from “${activeEnvironment().name}”. The code contains their values, tokens included.` }));
 
   const modal = openModal({
-    title: 'Code for this request',
+    title: 'Code snippet',
     size: 'modal-lg',
-    body: h('div', {}, h('div', { class: 'form-row' }, tabs), ...notes, pre),
+    body: h('div', {}, h('div', { class: 'form-row' }, tabsEl), ...notes, pre),
     actions: [
       h('button', { class: 'btn', text: 'Close', onclick: () => modal.close() }),
       h('button', { class: 'btn primary', text: 'Copy', onclick: () => copyText(pre.textContent) }),
@@ -549,9 +695,22 @@ function buildOutgoing(r) {
   return { method: r.method, url, headers, body };
 }
 
+function updateSendButton() {
+  $('#btn-send').textContent = inFlight.has(activeId) ? 'Cancel' : 'Send';
+}
+
+/** Puts a response on its tab, and on screen if that tab is still the one showing. */
+function deliver(tabId, data) {
+  const tab = tabs.find((t) => t.id === tabId);
+  if (!tab) return;
+  if (tabId === activeId) showResponse(data);
+  else tab.response = data;
+}
+
 async function send() {
-  if (inFlight) {
-    inFlight.abort();
+  const tabId = activeId;
+  if (inFlight.has(tabId)) {
+    inFlight.get(tabId).abort();
     return;
   }
   const env = activeEnvironment();
@@ -568,10 +727,12 @@ async function send() {
     return;
   }
 
+  const sent = clone(req); // history records what was sent, even if the tab is edited meanwhile
   const controller = new AbortController();
-  inFlight = controller;
-  const sendBtn = $('#btn-send');
-  sendBtn.textContent = 'Cancel';
+  inFlight.set(tabId, controller);
+  updateSendButton();
+  renderTabs();
+  $('#response-empty').classList.add('hidden');
   $('#response-meta').replaceChildren(h('span', { class: 'muted', text: 'Sending…' }));
 
   try {
@@ -593,23 +754,22 @@ async function send() {
         + (snippet ? `The server said: “${snippet}”. ` : 'The body was empty. ')
         + 'Check the web server error log; see Troubleshooting in the README.');
     }
-    showResponse(data);
-    addHistory(outgoing.url, data.ok ? String(data.status) : data.error?.code || 'ERROR');
+    deliver(tabId, data);
+    addHistory(sent, outgoing.url, data.ok ? String(data.status) : data.error?.code || 'ERROR');
   } catch (e) {
-    if (e.name === 'AbortError') {
-      showResponse({ ok: false, error: { code: 'CANCELLED', message: 'Request cancelled.' } });
-    } else {
-      showResponse({ ok: false, error: { code: 'NETWORK_ERROR', message: e.message } });
-    }
+    deliver(tabId, e.name === 'AbortError'
+      ? { ok: false, error: { code: 'CANCELLED', message: 'Request cancelled.' } }
+      : { ok: false, error: { code: 'NETWORK_ERROR', message: e.message } });
   } finally {
-    inFlight = null;
-    sendBtn.textContent = 'Send';
+    inFlight.delete(tabId);
+    updateSendButton();
+    renderTabs();
   }
 }
 
 /** History keeps the request as written ({{variables}} intact) and the URL it resolved to. */
-function addHistory(displayUrl, status) {
-  history.unshift({ id: uid(), at: Date.now(), status, displayUrl, request: clone(req) });
+function addHistory(request, displayUrl, status) {
+  history.unshift({ id: uid(), at: Date.now(), status, displayUrl, request: clone(request) });
   history = history.slice(0, HISTORY_LIMIT);
   save('history', history);
   if (sideTab === 'history') renderSide();
@@ -617,24 +777,39 @@ function addHistory(displayUrl, status) {
 
 // ---------------------------------------------------------------- response
 
+function hideResponsePanes() {
+  $$('.pane[data-group="res"]').forEach((p) => p.classList.add('hidden'));
+}
+
+/** The "Click Send to get a response" state. */
+function clearResponse() {
+  lastResponse = null;
+  $('#response-meta').replaceChildren();
+  $('#response-tabs').classList.add('hidden');
+  hideResponsePanes();
+  $('#response-empty').classList.remove('hidden');
+  setExpanded(false);
+}
+
 function showResponse(data) {
   lastResponse = data;
   const meta = $('#response-meta');
-  const tabs = $('#response-tabs');
+  const tabsEl = $('#response-tabs');
+  $('#response-empty').classList.add('hidden');
 
   if (!data.ok) {
     meta.replaceChildren(...[
       h('span', { class: 'status err', text: data.error?.code || 'ERROR' }),
-      h('span', { text: data.error?.message || 'Unknown error' }),
+      h('span', { class: 'response-error', text: data.error?.message || 'Unknown error' }),
       data.error?.code === 'NOT_SIGNED_IN' && session.loginUrl
         ? h('a', { class: 'btn small primary', href: session.loginUrl, text: 'Sign in' })
         : null,
     ].filter(Boolean));
-    tabs.classList.add('hidden');
-    setExpanded(false); // the toolbar holding "Close" is hidden for errors
+    tabsEl.classList.add('hidden');
+    setExpanded(false); // the toolbar holding the collapse button is hidden for errors
+    hideResponsePanes();
     $('#res-body').textContent = '';
     $('#res-headers').replaceChildren();
-    showPane('res', 'body');
     return;
   }
 
@@ -645,7 +820,9 @@ function showResponse(data) {
     h('span', { class: 'muted', text: formatBytes(data.sizeBytes) }),
     data.truncated ? h('span', { class: 'hint error', text: 'Response was cut off at the server size limit.' }) : null,
   ].filter(Boolean));
-  tabs.classList.remove('hidden');
+  tabsEl.classList.remove('hidden');
+  const pane = $('#response-tabs .subtab.active')?.dataset.pane || 'body';
+  showPane('res', pane);
   $('#res-headers-count').textContent = `(${data.headers.length})`;
   $('#res-headers').replaceChildren(
     ...data.headers.map(([name, value]) => h('tr', {}, h('td', { text: name }), h('td', { text: value }))),
@@ -757,24 +934,44 @@ function wireResponseZoom() {
 
 // ---------------------------------------------------------------- wiring
 
-export function initTester() {
-  const draft = load('draft', null);
-  if (draft?.req) {
-    req = normalize(draft.req);
-    currentSaved = draft.currentSaved ?? null;
-    currentName = draft.currentName || 'Untitled request';
+function restoreTabs() {
+  const stored = load('tabs', null);
+  if (Array.isArray(stored?.tabs) && stored.tabs.length) {
+    tabs = stored.tabs.map((t) => ({ id: t.id || uid(), req: normalize(t.req), saved: t.saved ?? null, name: t.name || UNTITLED, response: null }));
+    activeId = tabs.some((t) => t.id === stored.activeId) ? stored.activeId : tabs[0].id;
+    return;
   }
-  renderRequest();
-  renderSide();
+  // Before tabs existed, the one open request was kept as a draft.
+  const draft = load('draft', null);
+  tabs = [draft?.req
+    ? makeTab(draft.req, { saved: draft.currentSaved ?? null, name: draft.currentName || UNTITLED })
+    : makeTab()];
+  activeId = tabs[0].id;
+}
+
+const testerVisible = () => !$('#view-tester').classList.contains('hidden');
+
+export function initTester() {
+  restoreTabs();
+  const first = activeId;
+  activeId = null; // nothing to stash yet
+  activate(first);
 
   $('#request-form').addEventListener('submit', (e) => { e.preventDefault(); send(); });
-  $('#req-method').addEventListener('change', (e) => { req.method = e.target.value; persistDraft(); });
+  $('#req-method').addEventListener('change', (e) => {
+    req.method = e.target.value;
+    e.target.className = `method-select m-${req.method}`;
+    renderTabs();
+    persistTabs();
+  });
   $('#req-url').addEventListener('input', (e) => {
     req.url = e.target.value;
     params = parseParams(req.url);
     renderParams();
     updateUrlPreview();
-    persistDraft();
+    renderRequestName();
+    renderTabs();
+    persistTabs();
   });
   // Pasting a whole curl command into the URL box imports it instead.
   $('#req-url').addEventListener('paste', (e) => {
@@ -785,17 +982,18 @@ export function initTester() {
     }
   });
   $('#btn-save').addEventListener('click', saveCurrent);
-  $('#btn-import-curl').addEventListener('click', curlDialog);
+  $('#btn-import').addEventListener('click', importDialog);
   $('#btn-code').addEventListener('click', codeDialog);
+  $('#btn-rail-envs').addEventListener('click', () => $('#btn-manage-envs').click());
   $('#request-name').addEventListener('click', renameCurrent);
   $('#request-name').title = 'Click to rename';
 
   wireSubtabs($('.subtabs[data-group="req"]'), 'req');
   wireSubtabs($('#response-tabs'), 'res');
 
-  $('#auth-type').addEventListener('change', (e) => { req.auth.type = e.target.value; renderAuth(); persistDraft(); });
+  $('#auth-type').addEventListener('change', (e) => { req.auth.type = e.target.value; renderAuth(); persistTabs(); });
   for (const field of ['token', 'username', 'password']) {
-    $(`#auth-${field}`).addEventListener('input', (e) => { req.auth[field] = e.target.value; persistDraft(); });
+    $(`#auth-${field}`).addEventListener('input', (e) => { req.auth[field] = e.target.value; persistTabs(); });
   }
 
   $('#body-type').addEventListener('click', (e) => {
@@ -803,15 +1001,15 @@ export function initTester() {
     if (!btn) return;
     req.body.type = btn.dataset.body;
     renderBody();
-    persistDraft();
+    persistTabs();
   });
-  $('#body-text').addEventListener('input', (e) => { req.body.text = e.target.value; updateBodyStatus(); persistDraft(); });
+  $('#body-text').addEventListener('input', (e) => { req.body.text = e.target.value; updateBodyStatus(); persistTabs(); });
   $('#btn-format-body').addEventListener('click', () => {
     try {
       req.body.text = JSON.stringify(JSON.parse(req.body.text), null, 2);
       $('#body-text').value = req.body.text;
       updateBodyStatus();
-      persistDraft();
+      persistTabs();
     } catch (e) {
       toast(`Cannot format: ${e.message}`, 'error');
     }
@@ -827,9 +1025,9 @@ export function initTester() {
     sideTab = btn.dataset.side;
     renderSide();
   });
-  $('#btn-new-request').addEventListener('click', () => loadRequest(blankRequest()));
+  $('#side-filter').addEventListener('input', renderSide);
+  $('#btn-new-request').addEventListener('click', () => newTab());
   $('#btn-export-saved').addEventListener('click', exportSaved);
-  $('#btn-import-saved').addEventListener('click', importSaved);
   $('#btn-clear-history').addEventListener('click', () => {
     if (!history.length || !confirm('Clear all request history?')) return;
     history = [];
@@ -840,9 +1038,13 @@ export function initTester() {
   onEnvironmentChange(updateUrlPreview);
 
   document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !$('#view-tester').classList.contains('hidden')) {
+    if (!testerVisible() || !(e.ctrlKey || e.metaKey) || document.querySelector('.modal')) return;
+    if (e.key === 'Enter') {
       e.preventDefault();
       send();
+    } else if (e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      saveCurrent();
     }
   });
 }

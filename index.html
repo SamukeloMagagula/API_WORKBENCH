@@ -28,116 +28,154 @@
 
   <!-- ===================== TESTER ===================== -->
   <main id="view-tester" class="view tester">
-    <aside class="sidebar">
-      <div class="seg" id="side-tabs">
+    <aside class="sidebar tester-sidebar">
+      <div class="seg side-switch" id="side-tabs">
         <button class="seg-btn active" data-side="saved">Saved</button>
         <button class="seg-btn" data-side="history">History</button>
       </div>
-      <div class="collection-bar" id="collection-bar"></div>
-      <div class="side-actions" id="saved-actions">
-        <button class="btn small" id="btn-new-request">New</button>
-        <button class="btn small" id="btn-import-saved">Import</button>
-        <button class="btn small" id="btn-export-saved">Export</button>
+      <div class="side-head">
+        <span class="side-title" id="side-title">Saved</span>
+        <span class="spacer"></span>
+        <span class="side-actions" id="saved-actions">
+          <button class="btn small" id="btn-new-request" title="New request in a new tab">New</button>
+          <button class="btn small" id="btn-import" title="Import a curl command or a collection file">Import</button>
+          <button class="btn small" id="btn-export-saved" title="Download this collection as a file">Export</button>
+        </span>
+        <span class="side-actions hidden" id="history-actions">
+          <button class="btn small" id="btn-clear-history">Clear</button>
+        </span>
       </div>
-      <div class="side-actions hidden" id="history-actions">
-        <button class="btn small" id="btn-clear-history">Clear history</button>
+      <div class="collection-bar" id="collection-bar"></div>
+      <div class="side-filter">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        <input type="search" id="side-filter" placeholder="Filter" aria-label="Filter the list">
       </div>
       <ul class="list" id="side-list"></ul>
+      <div class="side-foot hidden" id="side-foot"></div>
     </aside>
 
-    <section class="workspace">
-      <div class="request-head">
-        <div class="request-name" id="request-name">Untitled request</div>
-        <span class="spacer"></span>
-        <label class="env-picker" title="Fills {{variables}} in the request">
-          <span>Environment</span>
-          <select id="env-select"></select>
-        </label>
-        <button type="button" class="btn small" id="btn-manage-envs">Manage</button>
-      </div>
-      <div class="request-block">
-        <form class="request-bar" id="request-form" autocomplete="off">
-          <select id="req-method" class="method-select">
-            <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option>
-            <option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
-          </select>
-          <input id="req-url" class="url-input" type="text" placeholder="{{baseUrl}}/users?page=1  (or paste a curl command)" spellcheck="false">
-          <button type="submit" class="btn primary" id="btn-send">Send</button>
-          <button type="button" class="btn" id="btn-save">Save</button>
-          <button type="button" class="btn" id="btn-import-curl" title="Build this request from a curl command">Import curl</button>
-          <button type="button" class="btn" id="btn-code" title="Copy this request as curl, PowerShell or Python">Code</button>
-        </form>
-        <div class="url-preview hidden" id="url-preview"></div>
-      </div>
-
-      <div class="panel">
-        <div class="subtabs" data-group="req">
-          <button class="subtab active" data-pane="params">Params</button>
-          <button class="subtab" data-pane="headers">Headers <span class="count" id="headers-count"></span></button>
-          <button class="subtab" data-pane="auth">Auth</button>
-          <button class="subtab" data-pane="body">Body</button>
-        </div>
-        <div class="pane" data-group="req" data-pane="params"><div id="params-table"></div></div>
-        <div class="pane hidden" data-group="req" data-pane="headers"><div id="headers-table"></div></div>
-        <div class="pane hidden" data-group="req" data-pane="auth">
-          <div class="form-row">
-            <label>Type
-              <select id="auth-type">
-                <option value="none">No auth</option>
-                <option value="bearer">Bearer token</option>
-                <option value="basic">Basic auth</option>
-              </select>
-            </label>
-          </div>
-          <div class="form-row hidden" id="auth-bearer">
-            <label class="grow">Token <input id="auth-token" type="text" spellcheck="false"></label>
-          </div>
-          <div class="form-row hidden" id="auth-basic">
-            <label class="grow">Username <input id="auth-username" type="text" spellcheck="false"></label>
-            <label class="grow">Password <input id="auth-password" type="password"></label>
-          </div>
-          <p class="hint">Sent as an <code>Authorization</code> header, unless you set one yourself under Headers.</p>
-        </div>
-        <div class="pane hidden" data-group="req" data-pane="body">
-          <div class="form-row">
-            <div class="seg" id="body-type">
-              <button type="button" class="seg-btn active" data-body="none">None</button>
-              <button type="button" class="seg-btn" data-body="json">JSON</button>
-              <button type="button" class="seg-btn" data-body="form">Form</button>
-              <button type="button" class="seg-btn" data-body="text">Text</button>
-            </div>
-            <button type="button" class="btn small hidden" id="btn-format-body">Format JSON</button>
-            <span class="hint" id="body-status"></span>
-          </div>
-          <textarea id="body-text" class="code hidden" spellcheck="false" rows="12"></textarea>
-          <div id="body-form-table" class="hidden"></div>
-        </div>
-      </div>
-
-      <div class="panel response" id="response-panel">
-        <div class="response-meta" id="response-meta">
-          <span class="muted">Send a request to see the response. Tip: Ctrl+Enter sends.</span>
-        </div>
-        <div class="subtabs hidden" data-group="res" id="response-tabs">
-          <button class="subtab active" data-pane="body">Body</button>
-          <button class="subtab" data-pane="headers">Headers <span class="count" id="res-headers-count"></span></button>
+    <section class="workspace-col">
+      <div class="req-tabs" id="req-tabs" role="tablist"></div>
+      <div class="workspace">
+        <div class="request-head">
+          <span class="http-badge" aria-hidden="true">HTTP</span>
+          <div class="request-name" id="request-name">Untitled request</div>
           <span class="spacer"></span>
-          <label class="check small"><input type="checkbox" id="res-raw"> Raw</label>
-          <button class="btn small" id="btn-copy-response">Copy</button>
-          <div class="zoom" role="group" aria-label="Text size">
-            <button class="btn small" id="btn-zoom-out" title="Smaller text">A−</button>
-            <button class="zoom-level" id="btn-zoom-reset" title="Reset text size">100%</button>
-            <button class="btn small" id="btn-zoom-in" title="Larger text">A+</button>
-          </div>
-          <button class="btn small icon-only" id="btn-expand-response" title="Expand (Esc closes)" aria-label="Expand response">
-            <svg class="ico ico-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
-            <svg class="ico ico-collapse hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          <label class="env-picker" title="Fills {{variables}} in the request">
+            <span>Environment</span>
+            <select id="env-select"></select>
+          </label>
+          <button type="button" class="btn small" id="btn-manage-envs">Manage</button>
+          <button type="button" class="btn small" id="btn-save" title="Save (Ctrl+S)">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            Save
           </button>
         </div>
-        <div class="pane" data-group="res" data-pane="body"><pre id="res-body" class="code-view"></pre></div>
-        <div class="pane hidden" data-group="res" data-pane="headers"><table class="kv-view" id="res-headers"></table></div>
+        <div class="request-block">
+          <form class="request-bar" id="request-form" autocomplete="off">
+            <div class="url-box">
+              <select id="req-method" class="method-select" aria-label="Method">
+                <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option>
+                <option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+              </select>
+              <input id="req-url" class="url-input" type="text" placeholder="Enter URL, {{baseUrl}}/path, or paste a curl command" spellcheck="false" aria-label="URL">
+            </div>
+            <button type="submit" class="btn primary send-btn" id="btn-send">Send</button>
+          </form>
+          <div class="url-preview hidden" id="url-preview"></div>
+        </div>
+
+        <div class="request-panel">
+          <div class="subtabs" data-group="req">
+            <button class="subtab active" data-pane="params">Params</button>
+            <button class="subtab" data-pane="auth">Authorization</button>
+            <button class="subtab" data-pane="headers">Headers <span class="count" id="headers-count"></span></button>
+            <button class="subtab" data-pane="body">Body</button>
+          </div>
+          <div class="pane" data-group="req" data-pane="params">
+            <div class="pane-label">Query Params</div>
+            <div id="params-table"></div>
+          </div>
+          <div class="pane hidden" data-group="req" data-pane="auth">
+            <div class="form-row">
+              <label>Type
+                <select id="auth-type">
+                  <option value="none">No auth</option>
+                  <option value="bearer">Bearer token</option>
+                  <option value="basic">Basic auth</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-row hidden" id="auth-bearer">
+              <label class="grow">Token <input id="auth-token" type="text" spellcheck="false"></label>
+            </div>
+            <div class="form-row hidden" id="auth-basic">
+              <label class="grow">Username <input id="auth-username" type="text" spellcheck="false"></label>
+              <label class="grow">Password <input id="auth-password" type="password"></label>
+            </div>
+            <p class="hint">Sent as an <code>Authorization</code> header, unless you set one yourself under Headers.</p>
+          </div>
+          <div class="pane hidden" data-group="req" data-pane="headers">
+            <div class="pane-label">Headers</div>
+            <div id="headers-table"></div>
+          </div>
+          <div class="pane hidden" data-group="req" data-pane="body">
+            <div class="form-row">
+              <div class="seg" id="body-type">
+                <button type="button" class="seg-btn active" data-body="none">none</button>
+                <button type="button" class="seg-btn" data-body="json">raw JSON</button>
+                <button type="button" class="seg-btn" data-body="form">x-www-form-urlencoded</button>
+                <button type="button" class="seg-btn" data-body="text">raw text</button>
+              </div>
+              <button type="button" class="btn small hidden" id="btn-format-body">Beautify</button>
+              <span class="hint" id="body-status"></span>
+            </div>
+            <textarea id="body-text" class="code hidden" spellcheck="false" rows="12"></textarea>
+            <div id="body-form-table" class="hidden"></div>
+            <p class="hint" id="body-none-hint">This request does not have a body.</p>
+          </div>
+        </div>
+
+        <div class="response" id="response-panel">
+          <div class="response-head">
+            <span class="response-title">Response</span>
+            <div class="response-meta" id="response-meta"></div>
+          </div>
+          <div class="subtabs hidden" data-group="res" id="response-tabs">
+            <button class="subtab active" data-pane="body">Body</button>
+            <button class="subtab" data-pane="headers">Headers <span class="count" id="res-headers-count"></span></button>
+            <span class="spacer"></span>
+            <label class="check small"><input type="checkbox" id="res-raw"> Raw</label>
+            <button class="btn small" id="btn-copy-response">Copy</button>
+            <div class="zoom" role="group" aria-label="Text size">
+              <button class="btn small" id="btn-zoom-out" title="Smaller text">A−</button>
+              <button class="zoom-level" id="btn-zoom-reset" title="Reset text size">100%</button>
+              <button class="btn small" id="btn-zoom-in" title="Larger text">A+</button>
+            </div>
+            <button class="btn small icon-only" id="btn-expand-response" title="Expand (Esc closes)" aria-label="Expand response">
+              <svg class="ico ico-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+              <svg class="ico ico-collapse hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            </button>
+          </div>
+          <div class="response-empty" id="response-empty">
+            <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 32h32"/><polyline points="34 22 44 32 34 42"/><circle cx="52" cy="32" r="6"/></svg>
+            <p>Click Send to get a response</p>
+            <p class="muted">Ctrl+Enter sends · Ctrl+S saves</p>
+          </div>
+          <div class="pane hidden" data-group="res" data-pane="body"><pre id="res-body" class="code-view"></pre></div>
+          <div class="pane hidden" data-group="res" data-pane="headers"><table class="kv-view" id="res-headers"></table></div>
+        </div>
       </div>
     </section>
+
+    <nav class="rail" aria-label="Tools">
+      <button type="button" class="rail-btn" id="btn-code" title="Code: this request as curl, PowerShell or Python" aria-label="Code">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      </button>
+      <button type="button" class="rail-btn" id="btn-rail-envs" title="Environments" aria-label="Environments">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h18"/><circle cx="8" cy="7" r="2" fill="currentColor"/><circle cx="16" cy="12" r="2" fill="currentColor"/><circle cx="10" cy="17" r="2" fill="currentColor"/></svg>
+      </button>
+    </nav>
   </main>
 
   <!-- ===================== DESIGNER ===================== -->
