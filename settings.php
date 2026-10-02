@@ -10,8 +10,9 @@ declare(strict_types=1);
  * on a laptop with no database. The defaults are the production layout, so a deployed
  * install needs no environment at all. On Apache, set overrides with SetEnv (see README).
  *
- * Database credentials are not here. They live in CONFIG_PATH, outside the served
- * tree, in the same shape as devhub's config.php: DB_* constants and connect(): PDO.
+ * Database credentials are not here. They live in CONFIG_PATH, in the same shape as
+ * devhub's config.php: DB_* constants and connect(): PDO. By default that is config.php
+ * in this folder, which is gitignored and denied to browsers by .htaccess.
  */
 
 /** Comma-separated environment variable as a list; empty entries dropped. */
@@ -21,8 +22,14 @@ function apiwb_list_setting(string $name): array
     return $raw === false ? [] : array_values(array_filter(array_map('trim', explode(',', $raw)), 'strlen'));
 }
 
-/** Absolute path to the config.php defining connect(): PDO. The same file devhub uses. */
-define('CONFIG_PATH', getenv('APIWB_CONFIG') ?: '/var/www/html/private/config.php');
+/**
+ * Absolute path to the config.php defining connect(): PDO.
+ *
+ * Next to this file by default (/var/www/html/API_WORKBENCH/config.php on the server).
+ * Being inside the served folder is safe only because .htaccess denies it and PHP
+ * would execute it rather than show it; keep both true.
+ */
+define('CONFIG_PATH', getenv('APIWB_CONFIG') ?: __DIR__ . '/config.php');
 
 /**
  * Where the proxy may send requests.

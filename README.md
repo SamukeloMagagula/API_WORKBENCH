@@ -33,13 +33,13 @@ Configuration works the same way as devhub, in two places:
 | File | Holds | Where it lives |
 |---|---|---|
 | `settings.php` | every setting, as constants with `APIWB_*` environment overrides | in the app, deployed with it. **Defaults are the production layout**, so a server needs no environment at all |
-| `config.php` | database credentials: `DB_*` constants and `connect(): PDO` | **outside the web root**, at `/var/www/html/private/config.php`. It is the same file devhub uses, because the tables live in devhub's database. `config.example.php` shows its shape |
+| `config.php` | database credentials: `DB_*` constants and `connect(): PDO` | **in the app folder**, at `/var/www/html/API_WORKBENCH/config.php`. Gitignored, so `git pull` never touches it, and denied to browsers by `.htaccess` (PHP would also run it rather than show it). Copy `config.example.php` to create it; the details match devhub's, because the tables live in devhub's database |
 
-Nothing secret is in the repository, and nothing secret is inside the served folder.
+Nothing secret is in the repository. The one secret file, `config.php`, sits in the app folder, and two locks keep it private: `.htaccess` denies it, and PHP would run it rather than show it. Keep `AllowOverride` on for this folder.
 
 | Variable | Default | What it is |
 |---|---|---|
-| `APIWB_CONFIG` | `/var/www/html/private/config.php` | the file defining `connect(): PDO` (devhub's) |
+| `APIWB_CONFIG` | `config.php` in the app folder | the file defining `connect(): PDO` |
 | `APIWB_MODE` | `hosted` | `hosted` blocks loopback, private (10.x, 172.16–31.x, 192.168.x), link-local (incl. cloud metadata 169.254.169.254) and other reserved addresses unless allow-listed. `local` may call anything, including localhost |
 | `APIWB_AUTH` | `devhub` | `devhub`: devhub sign-in, database storage, audit log. `none`: anyone, browser-only storage, no database |
 | `APIWB_DEVHUB_URL` | `/devhub/` | where the "Sign in via devhub" link points |
@@ -83,7 +83,7 @@ Opening `index.html` directly from disk will not work for the Tester; it must be
 ## Host on a shared server
 
 1. Copy the folder into the web root, next to devhub, for example `/var/www/html/API_WORKBENCH/`.
-2. Make sure devhub's `/var/www/html/private/config.php` exists. API Workbench reads the same file.
+2. `cp config.example.php config.php` and fill in the database details (the same ones as devhub's config).
 3. Create the table (next section) and set `APIWB_ALLOWED_HOSTS` for the internal APIs people need.
 4. Make sure `src/`, `bootstrap.php`, `settings.php`, `check.php`, `config*.php` and `*.sql` are not served:
    - **Apache:** the included `.htaccess` files handle this (`AllowOverride All` must be on).
@@ -237,7 +237,7 @@ check.php             command-line health check (not served)
 schema.sql            the apiwb_items table, for devhub's database (not served)
 src/                  server classes (not web-accessible)
 settings.php          every setting, with APIWB_* environment overrides (not served)
-config.example.php    shape of the database config.php, which lives outside the web root
+config.example.php    template for config.php (database details), which stays in the app folder, gitignored
 ```
 
 ## Limits of this version

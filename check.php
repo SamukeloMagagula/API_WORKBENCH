@@ -57,23 +57,22 @@ if (PHP_VERSION_ID >= 80000) {
         $config = null;
     }
 
-    // Before settings.php, settings lived in an array-returning config.php in the app folder.
-    if (is_file(__DIR__ . '/config.php')) {
-        echo "  \033[33mwarn\033[0m  config.php in the app folder is no longer read: settings come from settings.php"
-            . " (APIWB_* environment), the database from " . ($config['devhub_config'] ?? 'CONFIG_PATH') . ". Move anything you need, then remove it\n";
-    }
-
     // Sign-in and storage go through devhub: the same config.php, database and tables.
     if ($config !== null && $config['auth'] === 'devhub') {
         echo "\nDatabase (as devhub)\n";
         $report(extension_loaded('pdo_mysql'), 'pdo_mysql extension loaded',
             extension_loaded('pdo_mysql') ? '' : 'Rocky/RHEL: dnf install php-mysqlnd, then restart httpd/php-fpm');
         $path = (string) $config['devhub_config'];
-        $report(is_readable($path), 'config readable', $path);
+        $report(is_readable($path), 'config readable', is_readable($path) ? $path
+            : "$path - copy config.example.php to it and fill in the database details");
         if (is_readable($path) && extension_loaded('pdo_mysql')) {
             try {
-                require_once $path;
-                $report(function_exists('connect'), 'config defines connect(): PDO');
+                $returned = require_once $path;
+                // Earlier versions kept settings in a config.php that returned an array.
+                $report(function_exists('connect'), 'config defines connect(): PDO', function_exists('connect') ? ''
+                    : (is_array($returned) ? 'this is the old settings-array config.php: replace it with config.example.php'
+                        . ' filled in, and move settings to APIWB_* (see README)' : 'see config.example.php for the shape'));
+                if (!function_exists('connect')) throw new RuntimeException('no connect() to call');
                 $db = connect();
                 $report(true, 'database connects', (string) $db->query('SELECT DATABASE()')->fetchColumn());
                 foreach (['users', 'activity_log', 'apiwb_items'] as $table) {
