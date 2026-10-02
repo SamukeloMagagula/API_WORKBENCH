@@ -61,6 +61,9 @@ code { font-family: var(--mono); font-size: .9em; background: var(--grey-200); b
     padding: 18px 14px; background: var(--white); border-right: 1px solid var(--grey-200);
 }
 .workspace { padding: 20px 28px 26px; overflow: auto; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* Sections keep their full height and the workspace scrolls. Left to shrink, a panel
+   squeezes into the leftover space and its content spills out past its border. */
+.workspace > * { flex-shrink: 0; }
 .preview {
     display: flex; flex-direction: column; min-height: 0; min-width: 0;
     background: var(--white); border-left: 1px solid var(--grey-200);
@@ -193,10 +196,18 @@ label.check.small { font-size: 12.5px; }
     background: var(--code-bg); border: 1px solid var(--grey-200); border-radius: var(--radius-md);
     padding: 14px 16px; overflow: auto; white-space: pre-wrap; word-break: break-word; max-height: 60vh;
 }
-.kv-view { border-collapse: collapse; width: 100%; font-size: 13px; }
-.kv-view td { padding: 9px 12px; border-bottom: 1px solid var(--grey-200); vertical-align: top; word-break: break-word; }
+/* Response headers scroll inside the panel, the same way the body does */
+.pane[data-group="res"][data-pane="headers"] {
+    max-height: 60vh; overflow: auto;
+    border: 1px solid var(--grey-200); border-radius: var(--radius-md);
+}
+.kv-view { border-collapse: collapse; width: 100%; font-size: 13px; table-layout: fixed; }
+.kv-view td { padding: 9px 12px; border-bottom: 1px solid var(--grey-200); vertical-align: top; overflow-wrap: anywhere; }
+.kv-view tr:last-child td { border-bottom: none; }
+.kv-view td:last-child { font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft); }
 .kv-view tr:hover { background: var(--grey-100); }
-.kv-view td:first-child { font-weight: 600; white-space: nowrap; width: 1%; }
+.kv-view td:first-child { font-weight: 600; width: 220px; }
+@media (max-width: 900px) { .kv-view td:first-child { width: 40%; } }
 /* JSON tokens, using the platform's syntax-highlighter colours */
 .j-key { color: var(--ink); font-weight: 600; }
 .j-str { color: #032f62; }
