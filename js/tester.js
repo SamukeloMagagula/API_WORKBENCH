@@ -424,12 +424,13 @@ function showResponse(data) {
     return;
   }
 
-  meta.replaceChildren(
+  // replaceChildren() prints null as the text "null", so optional items are filtered out.
+  meta.replaceChildren(...[
     h('span', { class: `status s${String(data.status)[0]}`, text: `${data.status} ${data.statusText || ''}`.trim() }),
     h('span', { class: 'muted', text: `${data.timeMs} ms` }),
     h('span', { class: 'muted', text: formatBytes(data.sizeBytes) }),
     data.truncated ? h('span', { class: 'hint error', text: 'Response was cut off at the server size limit.' }) : null,
-  );
+  ].filter(Boolean));
   tabs.classList.remove('hidden');
   $('#res-headers-count').textContent = `(${data.headers.length})`;
   $('#res-headers').replaceChildren(
